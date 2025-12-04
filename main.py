@@ -2,38 +2,38 @@ import os
 import re
 import asyncio
 from pyrogram import Client, filters
-# Imports pyrogram.enums
 from pyrogram.enums import MessagesFilter 
-from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
+from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, Document, Video, Audio
 from pyrogram.errors import UserNotParticipant
 from motor.motor_asyncio import AsyncIOMotorClient
 from dotenv import load_dotenv
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Union
 from fastapi import FastAPI, Request, Response
 from contextlib import asynccontextmanager
 from http import HTTPStatus
 import uvicorn
 
-# Loads variables from .env file (for local testing)
+# Loading variables from .env file (for local testing)
 load_dotenv()
 
 # --- Config Variables ---
-# Provides default values if environment variables are not set
-# Ensures API_ID, BOT_TOKEN are integers
 API_ID = int(os.environ.get("API_ID", 12345))
 API_HASH = os.environ.get("API_HASH", "YOUR_API_HASH")
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "YOUR_BOT_TOKEN")
-# Ensures PRIVATE_FILE_STORE, LOG_CHANNEL are integers
-PRIVATE_FILE_STORE = int(os.environ.get("PRIVATE_FILE_STORE", -100))
+# Channel ID where the files are stored (Private Channel)
+PRIVATE_FILE_STORE = int(os.environ.get("PRIVATE_FILE_STORE", -100)) 
+# Channel ID for logging copyright issues or bot activity
 LOG_CHANNEL = int(os.environ.get("LOG_CHANNEL", -100))
 
-# Creates the ADMINS list
-ADMINS: List[int] = []
+# Creating ADMINS list
+ADMINS = []
 admin_env = os.environ.get("ADMINS", "")
 if admin_env:
+    # Ensure all listed IDs are integers
     ADMINS = [int(admin.strip()) for admin in admin_env.split(',') if admin.strip().isdigit()]
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "mongodb://localhost:27017")
+# Force Subscribe Channel username or ID
 FORCE_SUB_CHANNEL = os.environ.get("FORCE_SUB_CHANNEL", None)
 
 # Webhook Details
@@ -46,19 +46,17 @@ WEBHOOK_PATH = f"/{BOT_TOKEN}"
 class Database:
     """Handles database operations."""
     def __init__(self, uri: str, database_name: str):
-        # Initializes the database client here
         self._client = AsyncIOMotorClient(uri)
         self.db = self._client[database_name]
-        self.files_col = self.db["files"] # Collection to store file information
+        self.files_col = self.db["files"]
 
     async def get_all_files(self) -> List[Dict[str, Any]]:
-        """Returns all file entries from the database as a list."""
-        # Uses to_list() to convert the Cursor from Motor to a list.
+        """Retrieves all documents from the files collection."""
         cursor = self.files_col.find({})
         return await cursor.to_list(length=None)
 
-    async def find_one(self, query: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Searches for a single document."""
+    async def find_one(self, query: Dict[str, Any]) -> Dict[str, Any] | None:
+        """Finds a single document matching the query."""
         return await self.files_col.find_one(query)
 
     async def update_one(self, query: Dict[str, Any], update: Dict[str, Any], upsert: bool = False):
@@ -70,14 +68,15 @@ db = Database(DATABASE_URL, "AutoFilterBot")
 
 # --- Pyrogram Client ---
 class AutoFilterBot(Client):
+    """Custom Pyrogram Client for the bot."""
     def __init__(self):
         super().__init__(
             "AutoFilterBot",
             api_id=API_ID,
             api_hash=API_HASH,
             bot_token=BOT_TOKEN,
-            plugins=dict(root="plugins"), # Can be removed if no plugins are used
-            sleep_threshold=30 # Important: for low resource usage
+            plugins=dict(root="plugins"), # Assuming plugins directory exists
+            sleep_threshold=30
         )
 
 # --- Bot Instance (Global Pyrogram Client) ---
@@ -86,26 +85,26 @@ app = AutoFilterBot()
 # --- Helpers ---
 
 async def is_subscribed(client: Client, user_id: int) -> bool:
-    """Checks if the user is a member of the force subscribe channel."""
+    """Checks if the user is a member of the Force Subscribe Channel."""
     if not FORCE_SUB_CHANNEL:
         return True
     try:
-        # get_chat_member requires user ID, not a message object
         member = await client.get_chat_member(FORCE_SUB_CHANNEL, user_id) 
+        # Check for standard member, administrator, or creator status
         if member.status in ["member", "administrator", "creator"]:
             return True
         return False
     except UserNotParticipant:
+        # User is definitely not subscribed
         return False
     except Exception as e:
         print(f"Error checking subscription: {e}")
-        # Allows proceeding by returning True if errors occur
+        # Default to True on API error to not unnecessarily block users
         return True 
 
 async def get_file_details(query: str) -> List[Dict[str, Any]]:
     """Searches for file information from the database."""
-    # 'i' case-insensitive search
-    # Searches in file title and file caption
+    # Case-insensitive search across title and caption
     cursor = db.files_col.find({ 
         "$or": [
             {"title": {"$regex": query, "$options": "i"}},
@@ -116,33 +115,87 @@ async def get_file_details(query: str) -> List[Dict[str, Any]]:
     files = await cursor.to_list(length=10)
     return files
 
+def get_file_info(message: Message) -> tuple[Union[str, None], Union[str, None], Union[Document, Video, Audio, None]]:
+    """Finds file_id, file_name, and file_object from the message."""
+    if message.document:
+        return message.document.file_id, message.document.file_name, message.document
+    if message.video:
+        # file_name is often unavailable for video messages, so use caption or a default name
+        file_name = message.caption.strip() if message.caption else f"Video_{message.id}"
+        # If the video has a title/file_name property, use it
+        if message.video.file_name:
+             file_name = message.video.file_name
+        return message.video.file_id, file_name, message.video
+    if message.audio:
+        # Use file_name, title, or a default name for audio
+        file_name = message.audio.file_name or message.audio.title or f"Audio_{message.id}"
+        return message.audio.file_id, file_name, message.audio
+        
+    # You can also add Photos, GIFs, etc. here
+    return None, None, None
+
 # --- Handlers ---
 
 @app.on_message(filters.command("start") & filters.private)
 async def start_command(client: Client, message: Message):
+    """Handles the /start command with a new model and inline buttons."""
+    
+    bot_info = await client.get_me()
+    
+    welcome_message = (
+        f"🤖 **Hello, I am {bot_info.first_name}!**\n\n"
+        "I am an **Auto-Filter Bot** designed to help groups manage and retrieve files efficiently. "
+        "Add me to your group, and I'll automatically respond to search queries by linking files from my private store.\n\n"
+        "**Key Features:**\n"
+        "✨ Automatic file filtering in groups.\n"
+        "📂 Centralized private file storage.\n"
+        "🔒 Optional Force Subscription to a channel.\n"
+        "🛡️ Admin-only file indexing and content moderation.\n\n"
+        "**Commands:**\n"
+        "• `/start` - Get this welcome message.\n"
+        "• `/index` - (Admin Only) Index files from the private store."
+    )
+    
+    # Define buttons
+    buttons = [
+        [
+            InlineKeyboardButton("➕ Add Me to a Group", url=f"https://t.me/{bot_info.username}?startgroup=true")
+        ],
+        [
+            # Placeholder links - update these with your actual channel/developer links
+            InlineKeyboardButton("📢 Support Channel", url="https://t.me/your_support_channel"),
+            InlineKeyboardButton("👨‍💻 Developer", url="https://t.me/your_developer_username")
+        ]
+    ]
+
     await message.reply_text(
-        "👋 Hi! I'm an Auto-Filter Bot. Add me to your group, and I will send the files searched in the group. Contact the developer for more information."
+        welcome_message,
+        reply_markup=InlineKeyboardMarkup(buttons),
+        disable_web_page_preview=True,
+        parse_mode="markdown"
     )
 
 @app.on_message(filters.command("index") & filters.user(ADMINS))
 async def index_command(client: Client, message: Message):
     """Command for admins to index files in the file store channel."""
     if PRIVATE_FILE_STORE == -100:
-        await message.reply_text("PRIVATE_FILE_STORE ID is not provided in the ENV variable. Indexing is not possible.")
+        await message.reply_text("`PRIVATE_FILE_STORE` ID is not provided in the ENV variable. Indexing is not possible.")
         return
 
     msg = await message.reply_text("Starting to index files...")
     
     total_files = 0
-    # FIX: Uses MessagesFilter.DOCUMENT instead of filter="document"
-    async for chat_msg in client.search_messages(chat_id=PRIVATE_FILE_STORE, filter=MessagesFilter.DOCUMENT):
-        if chat_msg.document:
-            file_id = chat_msg.document.file_id
-            file_name = chat_msg.document.file_name
-            # Uses HTML format for caption if it exists
+    
+    # Major change: Searching for all media types using ALL
+    async for chat_msg in client.search_messages(chat_id=PRIVATE_FILE_STORE, filter=MessagesFilter.ALL):
+        
+        file_id, file_name, file_object = get_file_info(chat_msg)
+        
+        if file_id and file_name:
+            # If caption exists, use HTML format
             caption = chat_msg.caption.html if chat_msg.caption else None 
             
-            # Adds file information to the database (using title)
+            # Adding file information to the database
             await db.files_col.update_one( 
                 {"file_id": file_id},
                 {
@@ -152,35 +205,38 @@ async def index_command(client: Client, message: Message):
                         "file_id": file_id,
                         "chat_id": PRIVATE_FILE_STORE,
                         "message_id": chat_msg.id,
+                        # Can store the file type for filtering
+                        "media_type": file_object.__class__.__name__.lower()
                     }
                 },
-                upsert=True # Inserts a new file if it doesn't exist
+                upsert=True
             )
             total_files += 1
             
             if total_files % 100 == 0:
-                 # Updates status after 100 files
                  await msg.edit_text(f"✅ Indexed Files: {total_files}")
                  
-    await msg.edit_text(f"🎉 Indexing completed! Total {total_files} files added.")
+    await msg.edit_text(f"🎉 Indexing complete! Total {total_files} files added.")
 
 
 # Auto-Filter Handler
 @app.on_message(filters.text & filters.private | filters.group & filters.text & filters.incoming & ~filters.command(["start", "index"])) 
 async def auto_filter_handler(client: Client, message: Message):
-    """Searches for filtered files when a text message arrives."""
+    """Searches for filter files when text messages arrive."""
     query = message.text.strip()
     
     # 1. Force Subscribe Check
     is_private = message.chat.type == "private"
     if not is_private or await is_subscribed(client, message.from_user.id):
         
-        # 2. Copyright Message Delete Logic (Only works in admin groups/private chats if chat ID is in ADMINS)
-        COPYRIGHT_KEYWORDS = ["copyright", "unauthorized", "DMCA", "piracy", "പകർപ്പവകാശം", "അനുമതിയില്ലാതെ"] 
-        if message.chat.type in ["group", "supergroup"] and message.chat.id in ADMINS and any(keyword.lower() in query.lower() for keyword in COPYRIGHT_KEYWORDS):
+        # 2. Copyright message delete logic (only works in admin groups/private chats)
+        COPYRIGHT_KEYWORDS = ["copyright", "unauthorized", "DMCA", "piracy", "abuse", "illegal content"] 
+        if message.chat.type in ["group", "supergroup", "private"] and message.from_user.id in ADMINS and any(keyword.lower() in query.lower() for keyword in COPYRIGHT_KEYWORDS):
              try:
-                 await message.delete()
-                 await client.send_message(LOG_CHANNEL, f"🚫 **Copyright Message Removed!**\n\n**Chat ID:** `{message.chat.id}`\n**User:** {message.from_user.mention}\n**Message:** `{query}`")
+                 # Delete the message if an admin sends a suspicious message
+                 await message.delete() 
+                 await client.send_message(LOG_CHANNEL, 
+                                           f"🚫 **Copyright/Abuse Message Removed!**\n\n**Chat ID:** `{message.chat.id}`\n**User:** {message.from_user.mention}\n**Message:** `{query}`")
                  return
              except Exception as e:
                  print(f"Error deleting copyright message: {e}")
@@ -189,38 +245,43 @@ async def auto_filter_handler(client: Client, message: Message):
         files = await get_file_details(query)
         
         if files:
-            # Sends inline buttons if file is found
-            text = f"Here are the files related to your search **{query}**:\n\n"
+            # Send inline buttons if file is found
+            text = f"Here are the files related to your search for **{query}**:\n\n"
             buttons = []
             for file in files:
-                file_name = file.get("title", "File").rsplit('.', 1)[0].strip() # Removes extension
+                # Displaying file name and media type
+                media_icon = {"document": "📄", "video": "🎬", "audio": "🎶"}.get(file.get('media_type', 'document'), '❓')
+                # Excluding Extension
+                file_name = file.get("title", "File").rsplit('.', 1)[0].strip() 
                 
                 buttons.append([
                     InlineKeyboardButton(
-                        text=file_name,
+                        text=f"{media_icon} {file_name}",
                         callback_data=f"getfile_{file.get('file_id')}" 
                     )
                 ])
             
-            # Adds a 'More' button
+            # Add a 'More Results' button if the limit was reached
             if len(files) == 10:
-                 buttons.append([InlineKeyboardButton("More Results", url="https://t.me/your_search_group")]) # Add a support group link
+                 # Add a support group link here
+                 buttons.append([InlineKeyboardButton("More Results", url="https://t.me/your_search_group")]) 
 
             await message.reply_text(
                 text=text,
                 reply_markup=InlineKeyboardMarkup(buttons),
-                disable_web_page_preview=True
+                disable_web_page_preview=True,
+                parse_mode="markdown"
             )
 
     elif is_private:
-        # If not force subscribed
-        if not FORCE_SUB_CHANNEL: return # Do nothing if channel is not set
+        # If not Force Subscribed
+        if not FORCE_SUB_CHANNEL: return # Do nothing if channel doesn't exist
         
         join_button = [
             [InlineKeyboardButton("Join Channel", url=f"https://t.me/{FORCE_SUB_CHANNEL.replace('@', '')}")]
         ]
         await message.reply_text(
-            f"To get files, you must first join our channel.",
+            f"You must join our channel first to get the files.",
             reply_markup=InlineKeyboardMarkup(join_button)
         )
 
@@ -248,14 +309,13 @@ async def send_file_handler(client: Client, callback):
             )
             await callback.answer("File sent.", show_alert=False)
         except Exception as e:
-            # Errors often occur when forwarding (due to private channels)
             await callback.answer("An error occurred while sending the file. Check if the bot has access.", show_alert=True)
             print(f"File forward error: {e}")
     else:
-        await callback.answer("File has been removed from the database.", show_alert=True)
+        await callback.answer("File removed from the database.", show_alert=True)
     
-    # Deletes the message showing the search results (Optional)
     try:
+        # Delete the inline message after sending the file
         await callback.message.delete()
     except Exception as e:
         print(f"Error deleting inline message: {e}")
@@ -264,10 +324,9 @@ async def send_file_handler(client: Client, callback):
 
 # --- STARTUP/SHUTDOWN Lifecycle ---
 async def startup_initial_checks():
-    """Checks to perform on startup."""
+    """Checks to run on startup."""
     print("Running initial startup checks...")
     try:
-        # DB connection test
         files_count = len(await db.get_all_files())
         print(f"Database check completed. Found {files_count} files in the database.")
     except Exception as e:
@@ -276,27 +335,19 @@ async def startup_initial_checks():
 
 @asynccontextmanager
 async def lifespan(web_app: FastAPI):
-    # 'web_app' is the FastAPI instance. The Pyrogram client is the global variable 'app'.
-
-    # 1. Runs essential startup checks
     await startup_initial_checks()
     
-    # 2. Starts the Pyrogram client
     if WEBHOOK_URL_BASE:
-        # To run via Webhook on Render: Start the Pyrogram client
         await app.start() 
-        
-        # Set up Webhook using the Pyrogram client
+        # Set webhook for cloud deployment (e.g., Render)
         await app.set_webhook(url=f"{WEBHOOK_URL_BASE}{WEBHOOK_PATH}")
         print(f"Webhook set successfully to: {WEBHOOK_URL_BASE}{WEBHOOK_PATH}")
     else:
-        # Starts in Polling mode for local testing (This part won't run on Render)
         await app.start()
         print("Starting in Polling Mode (for local testing only).")
         
     yield
-    # 3. Stops the Bot
-    await app.stop() # Stops the Pyrogram client (global 'app')
+    await app.stop()
     print("Application stopped.")
 
 # FastAPI instance (Global variable 'api_app' used in uvicorn command)
@@ -305,10 +356,10 @@ api_app = FastAPI(lifespan=lifespan)
 # Webhook endpoint for Telegram updates
 @api_app.post(WEBHOOK_PATH)
 async def process_update(request: Request):
-    """Receives Telegram updates."""
+    """Receiving Telegram updates."""
     try:
         req = await request.json()
-        await app.process_update(req) # Processes the Pyrogram update
+        await app.process_update(req)
         return Response(status_code=HTTPStatus.OK)
     except Exception as e:
         print(f"Error processing update: {e}")
@@ -317,17 +368,17 @@ async def process_update(request: Request):
 # Health Check endpoint for Render
 @api_app.get("/")
 async def health_check():
-    """Render's Health Check."""
+    """Health Check for Render."""
     return {"status": "ok"}
 
 # --- Main Entry Point ---
 
 if __name__ == "__main__":
     if WEBHOOK_URL_BASE:
-        # To run in Webhook mode on Render (uvicorn main:api_app)
-        uvicorn.run("main:api_app", host="0.0.0.0", port=PORT, log_level="info")
+        # For cloud deployment with webhook
+        uvicorn.run("autofilter_bot:api_app", host="0.0.0.0", port=PORT, log_level="info")
     else:
-        # Polling mode for local testing
+        # For local testing in polling mode
         print("Starting Pyrogram in Polling Mode...")
         asyncio.run(startup_initial_checks())
         app.run()
