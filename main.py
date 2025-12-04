@@ -159,8 +159,9 @@ async def index_command(client, message: Message):
     total_messages_processed = 0
     
     try:
-        # search_messages ഒരു generator ആണ്
-        async for chat_msg in client.search_messages(chat_id=PRIVATE_FILE_STORE, filter=MessagesFilter.ALL, limit=1000):
+        # filter=MessagesFilter.ALL ഒഴിവാക്കി. കാരണം അതാണ് പിശകിന് കാരണം.
+        # filter ആർഗ്യുമെൻ്റ് ഇല്ലാതെ, എല്ലാ സന്ദേശങ്ങളും (ടെക്സ്റ്റ്, മീഡിയ) fetch ചെയ്യും.
+        async for chat_msg in client.search_messages(chat_id=PRIVATE_FILE_STORE, limit=1000):
             total_messages_processed += 1
             file_id, file_name, file_object = get_file_info(chat_msg)
             
@@ -186,7 +187,8 @@ async def index_command(client, message: Message):
                     
                     if total_files_indexed % 50 == 0:
                          await msg.edit_text(f"✅ ഇൻഡക്സ് ചെയ്ത ഫയലുകൾ: {total_files_indexed} / {total_messages_processed}")
-                         print(f"INDEX_DEBUG: Successfully indexed {file_name}")
+                         # വിജയകരമായി ഇൻഡെക്സ് ചെയ്ത ഫയലിൻ്റെ ലോഗ്
+                         print(f"INDEX_DEBUG: Successfully indexed {file_name}") 
 
                 except Exception as db_error:
                     # ഡാറ്റാബേസ് എഴുതുമ്പോൾ പിശക് സംഭവിച്ചാൽ
