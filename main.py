@@ -54,7 +54,6 @@ class AutoFilterBot(Client):
             api_hash=API_HASH,
             bot_token=BOT_TOKEN,
             plugins=dict(root="plugins"),
-            # 'sleep' argument removed (Fix 1)
         )
 
 # --- Bot Instance ---
@@ -136,8 +135,8 @@ async def index_command(client, message: Message):
                  
     await msg.edit_text(f"🎉 ഇൻഡക്സിംഗ് പൂർത്തിയായി! ആകെ {total_files} ഫയലുകൾ ചേർത്തു.")
 
-# *** പ്രധാന ഫിൽട്ടർ ഫിക്സ്: filters.command() വിളിക്കുന്നു (Fix 3) ***
-@app.on_message(filters.text & filters.private | filters.group & filters.text & filters.incoming & ~filters.command()) 
+# *** ഫിൽട്ടർ ഫിക്സ്: കമാൻഡുകൾ ആർഗ്യുമെൻ്റായി നൽകുന്നു ***
+@app.on_message(filters.text & filters.private | filters.group & filters.text & filters.incoming & ~filters.command(["start", "index"])) 
 async def auto_filter_handler(client, message: Message):
     """ടെക്സ്റ്റ് മെസ്സേജുകൾ വരുമ്പോൾ ഫിൽട്ടർ ഫയലുകൾ തിരയുന്നു."""
     query = message.text.strip()
