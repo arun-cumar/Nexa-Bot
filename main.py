@@ -2,9 +2,9 @@ import os
 import re
 import asyncio
 from pyrogram import Client, filters
-from pyrogram.enums import MessagesFilter 
+from pyrogram.enums import MessagesFilter, ChatType
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, Document, Video, Audio
-from pyrogram.errors import UserNotParticipant, MessageNotModified 
+from pyrogram.errors import UserNotParticipant, MessageNotModified
 from motor.motor_asyncio import AsyncIOMotorClient
 from dotenv import load_dotenv
 from typing import List, Dict, Any, Union
@@ -13,48 +13,48 @@ from contextlib import asynccontextmanager
 from http import HTTPStatus
 import uvicorn
 
-# Load variables from .env file (for local testing)
+# .env ഫയലിൽ നിന്നുള്ള വേരിയബിളുകൾ ലോഡ് ചെയ്യുന്നു
 load_dotenv()
 
-# --- Global Status Flag ---
-# This flag tracks if indexing is currently running.
+# --- ഗ്ലോബൽ സ്റ്റാറ്റസ് ഫ്ലാഗ് ---
+# ഇൻഡെക്സിംഗ് നടക്കുന്നുണ്ടോ എന്ന് ട്രാക്ക് ചെയ്യുന്നു.
 IS_INDEXING_RUNNING = False
 
-# --- Config Variables ---
+# --- കോൺഫിഗ് വേരിയബിളുകൾ ---
 API_ID = int(os.environ.get("API_ID", 12345))
 API_HASH = os.environ.get("API_HASH", "YOUR_API_HASH")
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "YOUR_BOT_TOKEN")
-PRIVATE_FILE_STORE = int(os.environ.get("PRIVATE_FILE_STORE", -100))
+PRIVATE_FILE_STORE = int(os.environ.get("PRIVATE_FILE_STORE", -100)) # ഫയലുകൾ സ്റ്റോർ ചെയ്തിട്ടുള്ള ചാനൽ ഐഡി
 LOG_CHANNEL = int(os.environ.get("LOG_CHANNEL", -100))
-# User session string is mandatory for indexing private channels
+# പ്രൈവറ്റ് ചാനൽ ഇൻഡെക്സ് ചെയ്യാൻ യൂസർ സെഷൻ സ്ട്രിംഗ് നിർബന്ധമാണ്
 USER_SESSION_STRING = os.environ.get("USER_SESSION_STRING", None) 
 
 
-# Create ADMINS list
+# അഡ്മിൻ ലിസ്റ്റ്
 ADMINS = []
 admin_env = os.environ.get("ADMINS", "")
 if admin_env:
     ADMINS = [int(admin.strip()) for admin in admin_env.split(',') if admin.strip().isdigit()]
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "mongodb://localhost:27017")
-FORCE_SUB_CHANNEL = os.environ.get("FORCE_SUB_CHANNEL", None)
+FORCE_SUB_CHANNEL = os.environ.get("FORCE_SUB_CHANNEL", None) # ഫോഴ്സ് സബ് ചാനൽ (ഉദാഹരണത്തിന് @MyChannel)
 
-# Webhook Details
+# വെബ്ഹുക്ക് വിശദാംശങ്ങൾ
 WEBHOOK_URL_BASE = os.environ.get("WEBHOOK_URL_BASE", None)
 PORT = int(os.environ.get("PORT", 8080))
 WEBHOOK_PATH = f"/{BOT_TOKEN}"
 
-# --- MongoDB Setup ---
+# --- മോങ്കോഡിബി സജ്ജീകരണം ---
 
 class Database:
-    """Handles database operations."""
+    """ഡാറ്റാബേസ് ഓപ്പറേഷനുകൾ കൈകാര്യം ചെയ്യുന്നു."""
     def __init__(self, uri: str, database_name: str):
         self._client = AsyncIOMotorClient(uri)
         self.db = self._client[database_name]
         self.files_col = self.db["files"]
 
     async def get_all_files(self) -> List[Dict[str, Any]]:
-        """Returns all file entries in the database as a list."""
+        """എല്ലാ ഫയൽ എൻട്രികളും ലിസ്റ്റായി തിരികെ നൽകുന്നു."""
         cursor = self.files_col.find({})
         return await cursor.to_list(length=None)
 
@@ -64,10 +64,10 @@ class Database:
     async def update_one(self, query: Dict[str, Any], update: Dict[str, Any], upsert: bool = False):
         await self.files_col.update_one(query, update, upsert=upsert)
 
-# Database instance
+# ഡാറ്റാബേസ് ഇൻസ്റ്റൻസ്
 db = Database(DATABASE_URL, "AutoFilterBot")
 
-# --- Pyrogram Client ---
+# --- പൈറോഗ്രാം ക്ലൈന്റ് ---
 class AutoFilterBot(Client):
     def __init__(self):
         super().__init__(
@@ -79,42 +79,40 @@ class AutoFilterBot(Client):
             sleep_threshold=30
         )
 
-# --- Bot Instance (Global Pyrogram Client) ---
+# --- ബോട്ട് ഇൻസ്റ്റൻസ് (ഗ്ലോബൽ പൈറോഗ്രാം ക്ലൈന്റ്) ---
 app = AutoFilterBot()
 
-# --- Helpers ---
+# --- സഹായികൾ ---
 
 async def is_subscribed(client, user_id):
-    """Checks if the user is a member of the Force Subscribe channel."""
+    """ഫോഴ്സ് സബ്സ്ക്രൈബ് ചാനലിൽ യൂസർ അംഗമാണോ എന്ന് പരിശോധിക്കുന്നു."""
     if not FORCE_SUB_CHANNEL:
         return True
     try:
-        # Check if the bot can see the user in the channel
+        # ബോട്ടിൽ യൂസർ ചാനലിൽ ഉണ്ടോ എന്ന് പരിശോധിക്കുന്നു
         member = await client.get_chat_member(FORCE_SUB_CHANNEL, user_id) 
         if member.status in ["member", "administrator", "creator"]:
             return True
         return False
     except UserNotParticipant:
-        print("DEBUG: User not participant in force sub channel.")
+        print("DEBUG: യൂസർ ഫോഴ്സ് സബ് ചാനലിൽ അംഗമല്ല.")
         return False
     except Exception as e:
-        print(f"Error checking subscription: {e}")
+        print(f"സബ്സ്ക്രിപ്ഷൻ പരിശോധിക്കുന്നതിൽ പിശക്: {e}")
         return True 
 
 async def get_file_details(query):
-    """Searches for file information in the database using a better regex for matching."""
+    """മെച്ചപ്പെടുത്തിയ റെഗുലർ എക്സ്പ്രഷൻ ഉപയോഗിച്ച് ഫയൽ വിവരങ്ങൾ ഡാറ്റാബേസിൽ തിരയുന്നു."""
     
-    # DEBUG: Log the search query
-    print(f"DEBUG: Searching for query: '{query}'")
+    print(f"DEBUG: തിരയുന്ന വാക്ക്: '{query}'")
 
-    # NEW IMPROVED REGEX: Escape special characters in the query and use '.*' 
-    # to allow matching anywhere in the string. This is the most reliable method for partial matches.
+    # തിരയൽ വാചകത്തിലെ പ്രത്യേക ചിഹ്നങ്ങൾ കൈകാര്യം ചെയ്യുന്നു 
     escaped_query = re.escape(query)
     
-    # This regex pattern allows matching 'query' anywhere in the title or caption, case-insensitive.
+    # ടൈറ്റിലിൻ്റെയോ ക്യാപ്ഷൻ്റെയോ ഏത് ഭാഗത്ത് വേണമെങ്കിലും തിരയാൻ സഹായിക്കുന്ന റെഗുലർ എക്സ്പ്രഷൻ
     regex_pattern = f".*{escaped_query}.*"
     
-    # Use MongoDB's $regex for case-insensitive partial matching on title or caption
+    # ടൈറ്റിലിലോ ക്യാപ്ഷനിലോ കേസ്-ഇൻസെൻസിറ്റീവായി ഭാഗികമായി പൊരുത്തപ്പെടുത്താൻ $regex ഉപയോഗിക്കുന്നു
     cursor = db.files_col.find({ 
         "$or": [
             {"title": {"$regex": regex_pattern, "$options": "i"}},
@@ -124,14 +122,13 @@ async def get_file_details(query):
     
     files = await cursor.to_list(length=10)
     
-    # DEBUG: Log the number of files found
-    print(f"DEBUG: Found {len(files)} files for query: '{query}'")
+    print(f"DEBUG: '{query}' എന്ന വാക്കിന് {len(files)} ഫയലുകൾ കണ്ടെത്തി")
     
     return files
 
-# Function to extract file info
+# ഫയൽ വിവരങ്ങൾ വേർതിരിച്ചെടുക്കുന്ന ഫംഗ്ഷൻ
 def get_file_info(message: Message) -> tuple[str, str, Union[Document, Video, Audio, None]]:
-    """Finds file_id, file_name, and file_object from a message."""
+    """ഒരു സന്ദേശത്തിൽ നിന്ന് file_id, file_name, file_object എന്നിവ കണ്ടെത്തുന്നു."""
     if message.document and message.document.file_name:
         return message.document.file_id, message.document.file_name, message.document
     if message.video:
@@ -142,64 +139,63 @@ def get_file_info(message: Message) -> tuple[str, str, Union[Document, Video, Au
         return message.audio.file_id, file_name, message.audio
     return None, None, None
 
-# --- Start Command ---
+# --- സ്റ്റാർട്ട് കമാൻഡ് ---
 @app.on_message(filters.command("start") & filters.private)
 async def start_command(client, message: Message):
-    """Handles the /start command in private chat."""
+    """പ്രൈവറ്റ് ചാറ്റിലെ /start കമാൻഡ് കൈകാര്യം ചെയ്യുന്നു."""
     global IS_INDEXING_RUNNING
     
     if IS_INDEXING_RUNNING:
-        await message.reply_text("Indexing is currently running. Please wait until it completes.")
+        await message.reply_text("ഇൻഡെക്സിംഗ് നടന്നുകൊണ്ടിരിക്കുകയാണ്. അത് പൂർത്തിയാകുന്നതുവരെ ദയവായി കാത്തിരിക്കുക.")
         return
         
     await message.reply_text(
-        f"Hello {message.from_user.first_name}, I am an Auto Filter Bot. You can search for files I have indexed from your file store channel here.\n\n"
-        "To search, simply send the file name.\n\n"
-        "**Admin Commands:**\n"
-        "• `/index` - To index all files from the channel (fully automatic).\n"
-        "• `/dbcount` - To check the number of files in the database."
+        f"ഹായ് {message.from_user.first_name}, ഞാൻ ഒരു ഓട്ടോ ഫിൽട്ടർ ബോട്ടാണ്. എന്നെ അഡ്മിനായി ചേർത്ത ഗ്രൂപ്പിലോ ചാനലിലോ നിങ്ങൾ ഫയലിൻ്റെ പേര് അയക്കുകയാണെങ്കിൽ, എനിക്ക് ഫയൽ ലിങ്ക് ചെയ്യാൻ കഴിയും.\n\n"
+        "തിരയൽ ഫലം കാണുമ്പോൾ ബട്ടൺ ക്ലിക്ക് ചെയ്യുക, ഞാൻ ഫയൽ ഇവിടെ പ്രൈവറ്റായി അയച്ചുതരും.\n\n"
+        "**അഡ്മിൻ കമാൻഡുകൾ:**\n"
+        "• `/index` - ചാനലിലെ എല്ലാ ഫയലുകളും ഇൻഡെക്സ് ചെയ്യാൻ.\n"
+        "• `/dbcount` - ഡാറ്റാബേസിലെ ഫയലുകളുടെ എണ്ണം പരിശോധിക്കാൻ."
     )
-    print(f"DEBUG: Start command received from {message.from_user.id}")
+    print(f"DEBUG: {message.from_user.id} എന്ന ഐഡിയിൽ നിന്ന് സ്റ്റാർട്ട് കമാൻഡ് ലഭിച്ചു")
 
 @app.on_message(filters.command("index") & filters.user(ADMINS))
 async def index_command(client, message: Message):
     """
-    Command to index all files from the file store channel using a user session.
-    The indexing is now full and automatic.
+    യൂസർ സെഷൻ ഉപയോഗിച്ച് ഫയൽ സ്റ്റോർ ചാനലിൽ നിന്ന് എല്ലാ ഫയലുകളും ഇൻഡെക്സ് ചെയ്യുന്ന കമാൻഡ്.
     """
     global IS_INDEXING_RUNNING
     
     if IS_INDEXING_RUNNING:
-        await message.reply_text("❌ Warning: The indexing process is already running. Please wait for the current job to finish.")
+        await message.reply_text("❌ മുന്നറിയിപ്പ്: ഇൻഡെക്സിംഗ് പ്രോസസ്സ് നിലവിൽ പ്രവർത്തിക്കുന്നു. ഇപ്പോഴത്തെ ജോലി പൂർത്തിയാക്കാൻ കാത്തിരിക്കുക.")
         return
 
     if PRIVATE_FILE_STORE == -100:
-        await message.reply_text("PRIVATE_FILE_STORE ID is not provided in ENV. Indexing is not possible.")
+        await message.reply_text("PRIVATE_FILE_STORE ID ENV-യിൽ നൽകിയിട്ടില്ല. ഇൻഡെക്സിംഗ് സാധ്യമല്ല.")
         return
     
     if not USER_SESSION_STRING:
-         await message.reply_text("❌ Indexing Error: **USER_SESSION_STRING** is not provided in ENV. Please generate and provide the user session string.")
+         await message.reply_text("❌ ഇൻഡെക്സിംഗ് പിശക്: **USER_SESSION_STRING** ENV-യിൽ നൽകിയിട്ടില്ല. യൂസർ സെഷൻ സ്ട്രിംഗ് ഉണ്ടാക്കി നൽകുക.")
          return
 
-    IS_INDEXING_RUNNING = True # Set the flag to True
+    IS_INDEXING_RUNNING = True # ഫ്ലാഗ് True ആക്കുന്നു
     
-    msg = await message.reply_text("🔑 Starting full automatic file indexing using User Session... This may take a while. (Check logs)")
+    msg = await message.reply_text("🔑 യൂസർ സെഷൻ ഉപയോഗിച്ച് പൂർണ്ണമായ ഓട്ടോമാറ്റിക് ഫയൽ ഇൻഡെക്സിംഗ് ആരംഭിക്കുന്നു... ഇതിന് സമയമെടുത്തേക്കാം. (ലോഗുകൾ പരിശോധിക്കുക)")
     
     total_files_indexed = 0
     total_messages_processed = 0
     
-    # --- Initialize User Client for Indexing Only ---
+    # --- ഇൻഡെക്സിംഗിനായി യൂസർ ക്ലൈൻ്റ് ഇനിഷ്യലൈസ് ചെയ്യുന്നു ---
     user_client = Client(
         "indexer_session",
         api_id=API_ID,
         api_hash=API_HASH,
-        session_string=USER_SESSION_STRING, # Log in as a User Account
+        session_string=USER_SESSION_STRING, # യൂസർ അക്കൗണ്ടായി ലോഗിൻ ചെയ്യുന്നു
     )
 
     try:
-        await user_client.start() # Start the user client
+        await user_client.start() # യൂസർ ക്ലൈൻ്റ് ആരംഭിക്കുന്നു
 
-        # Pyrogram's get_chat_history without a limit will automatically iterate through ALL messages
+        # Pyrogram-ൻ്റെ get_chat_history ഉപയോഗിച്ച് എല്ലാ സന്ദേശങ്ങളിലൂടെയും കടന്നുപോകുന്നു
         async for chat_msg in user_client.get_chat_history(chat_id=PRIVATE_FILE_STORE): 
             total_messages_processed += 1
             file_id, file_name, file_object = get_file_info(chat_msg)
@@ -208,7 +204,7 @@ async def index_command(client, message: Message):
                 caption = chat_msg.caption.html if chat_msg.caption else None 
                 
                 try:
-                    # Save/Update the file details in MongoDB
+                    # ഫയൽ വിവരങ്ങൾ MongoDB-യിൽ സേവ്/അപ്ഡേറ്റ് ചെയ്യുന്നു
                     await db.files_col.update_one( 
                         {"file_id": file_id},
                         {
@@ -226,60 +222,59 @@ async def index_command(client, message: Message):
                     total_files_indexed += 1
                     
                     if total_files_indexed % 50 == 0:
-                         # Update status every 50 files
+                         # 50 ഫയലുകൾക്ക് ശേഷം സ്റ്റാറ്റസ് അപ്ഡേറ്റ് ചെയ്യുന്നു
                          try:
-                             await msg.edit_text(f"✅ Indexed files: {total_files_indexed} / {total_messages_processed}")
-                             print(f"INDEX_DEBUG: Successfully indexed {file_name}") 
+                             await msg.edit_text(f"✅ ഇൻഡെക്സ് ചെയ്ത ഫയലുകൾ: {total_files_indexed} / {total_messages_processed}")
+                             print(f"INDEX_DEBUG: {file_name} വിജയകരമായി ഇൻഡെക്സ് ചെയ്തു") 
                          except MessageNotModified:
-                             pass # Simply ignore if the text is the same.
+                             pass # ടെക്സ്റ്റ് ഒന്നുതന്നെയാണെങ്കിൽ അവഗണിക്കുക.
 
                 except Exception as db_error:
-                    print(f"INDEX_DEBUG: DB WRITE ERROR for file {file_name}: {db_error}")
+                    print(f"INDEX_DEBUG: {file_name} എന്ന ഫയലിനുള്ള DB WRITE പിശക്: {db_error}")
             else:
                 if chat_msg.text:
-                    print(f"INDEX_DEBUG: Skipping Text message {chat_msg.id}")
+                    print(f"INDEX_DEBUG: ടെക്സ്റ്റ് മെസ്സേജ് {chat_msg.id} ഒഴിവാക്കുന്നു")
                 else:
-                    print(f"INDEX_DEBUG: Skipping message {chat_msg.id} - Not a supported file type (Doc/Vid/Aud).")
+                    print(f"INDEX_DEBUG: മെസ്സേജ് {chat_msg.id} ഒഴിവാക്കുന്നു - പിന്തുണയ്ക്കുന്ന ഫയൽ തരം (Doc/Vid/Aud) അല്ല.")
             
-        # Final report after indexing completion
-        await msg.edit_text(f"🎉 Indexing complete! Total {total_files_indexed} files added/updated. ({total_messages_processed} messages processed)")
+        # ഇൻഡെക്സിംഗ് പൂർത്തിയാക്കിയതിന് ശേഷമുള്ള അന്തിമ റിപ്പോർട്ട്
+        await msg.edit_text(f"🎉 ഇൻഡെക്സിംഗ് പൂർത്തിയായി! ആകെ {total_files_indexed} ഫയലുകൾ ചേർക്കുകയോ അപ്ഡേറ്റ് ചെയ്യുകയോ ചെയ്തു. ({total_messages_processed} സന്ദേശങ്ങൾ പ്രോസസ്സ് ചെയ്തു)")
         
     except Exception as general_error:
-        # Catch large errors like lack of channel access
-        await msg.edit_text(f"❌ Indexing Error: {general_error}. Check if the user account has access to the channel and the ID is correct.")
-        print(f"INDEX_DEBUG: FATAL INDEXING ERROR: {general_error}")
+        # ചാനൽ ആക്സസ് ഇല്ലായ്മ പോലുള്ള വലിയ പിശകുകൾ പിടിക്കുന്നു
+        await msg.edit_text(f"❌ ഇൻഡെക്സിംഗ് പിശക്: {general_error}. യൂസർ അക്കൗണ്ടിന് ചാനലിലേക്ക് ആക്സസ് ഉണ്ടോ എന്നും ഐഡി ശരിയാണോ എന്നും പരിശോധിക്കുക.")
+        print(f"INDEX_DEBUG: മാരകമായ ഇൻഡെക്സിംഗ് പിശക്: {general_error}")
         
     finally:
-        await user_client.stop() # Stop the user client
-        IS_INDEXING_RUNNING = False # Reset the flag to False
+        await user_client.stop() # യൂസർ ക്ലൈൻ്റ് നിർത്തുന്നു
+        IS_INDEXING_RUNNING = False # ഫ്ലാഗ് False ആക്കുന്നു
 
 @app.on_message(filters.command("dbcount") & filters.user(ADMINS))
 async def dbcount_command(client, message: Message):
-    """Command to check the total number of files in the database."""
+    """ഡാറ്റാബേസിലെ ആകെ ഫയലുകളുടെ എണ്ണം പരിശോധിക്കാനുള്ള കമാൻഡ്."""
     try:
         count = await db.files_col.count_documents({})
-        await message.reply_text(f"📊 **Database File Count:**\nTotal files currently indexed: **{count}**")
+        await message.reply_text(f"📊 **ഡാറ്റാബേസ് ഫയൽ കൗണ്ട്:**\nനിലവിൽ ഇൻഡെക്സ് ചെയ്ത ആകെ ഫയലുകൾ: **{count}**")
     except Exception as e:
-        await message.reply_text(f"❌ Error fetching database count: {e}")
+        await message.reply_text(f"❌ ഡാറ്റാബേസ് കൗണ്ട് എടുക്കുന്നതിൽ പിശക്: {e}")
 
-# Auto-Filter and Copyright Handler (Global)
+# ഓട്ടോ-ഫിൽട്ടർ, കോപ്പിറൈറ്റ് ഹാൻഡ്ലർ (ഗ്ലോബൽ)
 @app.on_message(filters.text & filters.incoming & ~filters.command(["start", "index", "dbcount"])) 
 async def global_handler(client, message: Message):
-    """Handles all incoming text messages: Copyright Deletion & Auto-Filter Search."""
+    """വരുന്ന എല്ലാ ടെക്സ്റ്റ് സന്ദേശങ്ങളും കൈകാര്യം ചെയ്യുന്നു: കോപ്പിറൈറ്റ് ഡിലീറ്റും ഓട്ടോ-ഫിൽട്ടർ തിരയലും."""
     query = message.text.strip()
     chat_id = message.chat.id
+    chat_type = message.chat.type
     
-    # Check if indexing is running
+    # ഇൻഡെക്സിംഗ് നടക്കുന്നുണ്ടോ എന്ന് പരിശോധിക്കുന്നു
     global IS_INDEXING_RUNNING
     if IS_INDEXING_RUNNING:
-        # If indexing is running, skip the search to avoid slowing down the indexer
-        await message.reply_text("Indexing is running. Please try again after the process is complete.")
+        await message.reply_text("ഇൻഡെക്സിംഗ് നടന്നുകൊണ്ടിരിക്കുകയാണ്. പ്രോസസ്സ് പൂർത്തിയാകുമ്പോൾ വീണ്ടും ശ്രമിക്കുക.")
         return
     
-    # DEBUG: Log the incoming message
-    print(f"DEBUG: Incoming text from chat {chat_id}: '{query}'")
+    print(f"DEBUG: {chat_id} എന്ന ചാറ്റിൽ നിന്ന് വന്ന സന്ദേശം: '{query}'")
     
-    # --- 1. Copyright Message Deletion Logic ---
+    # --- 1. കോപ്പിറൈറ്റ് സന്ദേശം ഇല്ലാതാക്കാനുള്ള ലോജിക് ---
     COPYRIGHT_KEYWORDS = ["copyright", "unauthorized", "DMCA", "piracy"] 
     
     is_copyright_message = any(keyword.lower() in query.lower() for keyword in COPYRIGHT_KEYWORDS)
@@ -288,123 +283,141 @@ async def global_handler(client, message: Message):
     if is_copyright_message and is_protected_chat:
         try:
             await message.delete()
-            # Log the action
-            await client.send_message(LOG_CHANNEL, f"🚫 **Copyright Message Deleted!**\n\n**Chat ID:** `{chat_id}`\n**User:** {message.from_user.mention}\n**Message:** `{query}`")
+            # ലോഗ് ചെയ്യുന്നു
+            await client.send_message(LOG_CHANNEL, f"🚫 **കോപ്പിറൈറ്റ് സന്ദേശം ഇല്ലാതാക്കി!**\n\n**ചാറ്റ് ഐഡി:** `{chat_id}`\n**യൂസർ:** {message.from_user.mention}\n**സന്ദേശം:** `{query}`")
             return
         except Exception as e:
-            print(f"Error deleting copyright message in chat {chat_id}: {e}")
+            print(f"{chat_id} എന്ന ചാറ്റിൽ കോപ്പിറൈറ്റ് സന്ദേശം ഇല്ലാതാക്കുന്നതിൽ പിശക്: {e}")
             return
     
-    print(f"DEBUG: Passed copyright check. Proceeding to filter.")
+    print(f"DEBUG: കോപ്പിറൈറ്റ് പരിശോധന പാസായി. ഫിൽട്ടറിലേക്ക് പോകുന്നു.")
             
-    # --- 2. Auto-Filter Search ---
+    # --- 2. ഓട്ടോ-ഫിൽട്ടർ തിരയൽ ---
     
+    # **പുതിയ ലോജിക്:** പ്രൈവറ്റ് ചാറ്റിൽ (DM) ഫിൽട്ടറിംഗ് ഒഴിവാക്കുന്നു
+    if chat_type == ChatType.PRIVATE:
+        await message.reply_text("👋 ഫയലുകൾ തിരയുന്നതിന് എന്നെ അഡ്മിനായി ചേർത്ത **ഗ്രൂപ്പിലോ ചാനലിലോ** പേര് ടൈപ്പ് ചെയ്യുക. അവിടെ ബട്ടൺ ക്ലിക്ക് ചെയ്താൽ ഞാൻ ഇവിടെ (ഈ DM-ൽ) ഫയൽ അയച്ചുതരും.")
+        return
+        
+    # ഫയൽ സ്റ്റോർ ചാനലിൽ നിന്നുള്ള സന്ദേശങ്ങൾ ഒഴിവാക്കുന്നു
     if chat_id == PRIVATE_FILE_STORE:
-        print("DEBUG: Message came from PRIVATE_FILE_STORE, skipping filter.")
+        print("DEBUG: സന്ദേശം PRIVATE_FILE_STORE-ൽ നിന്ന് വന്നതാണ്, ഫിൽട്ടർ ഒഴിവാക്കുന്നു.")
         return
         
-    is_private = message.chat.type == "private"
+    # --- ഗ്രൂപ്പിലും ചാനലിലും തിരച്ചിൽ നടത്തുന്നു ---
     
-    # Check Force Subscribe status
-    if not is_private or await is_subscribed(client, message.from_user.id):
-        
-        files = await get_file_details(query)
-        
-        if files:
-            # Files found: send inline buttons
-            text = f"Here are the files related to **{query}**:\n\n"
-            buttons = []
-            for file in files:
-                media_icon = {"document": "📄", "video": "🎬", "audio": "🎶"}.get(file.get('media_type', 'document'), '❓')
-                file_name = file.get("title", "File").rsplit('.', 1)[0].strip() 
-                
-                buttons.append([
-                    InlineKeyboardButton(
-                        text=f"{media_icon} {file_name}",
-                        callback_data=f"getfile_{file.get('file_id')}" 
-                    )
-                ])
+    # ഫോഴ്സ് സബ്സ്ക്രൈബ് പരിശോധന (ഇവിടെ ആവശ്യമില്ല, കാരണം ഫയൽ സ്വകാര്യമായാണ് അയക്കുന്നത്)
+    
+    files = await get_file_details(query)
+    
+    if files:
+        # ഫയലുകൾ കണ്ടെത്തി: ഇൻലൈൻ ബട്ടണുകൾ അയയ്ക്കുന്നു
+        text = f"**{query}** യുമായി ബന്ധപ്പെട്ട ഫയലുകൾ ഇതാ:\n\nഫയൽ ലഭിക്കുന്നതിനായി ബട്ടൺ ക്ലിക്ക് ചെയ്യുക. ഫയൽ നിങ്ങളുടെ പ്രൈവറ്റ് ചാറ്റിൽ ലഭിക്കുന്നതാണ്."
+        buttons = []
+        for file in files:
+            media_icon = {"document": "📄", "video": "🎬", "audio": "🎶"}.get(file.get('media_type', 'document'), '❓')
+            file_name = file.get("title", "File").rsplit('.', 1)[0].strip() 
             
-            if len(files) == 10:
-                 buttons.append([InlineKeyboardButton("More Results", url="https://t.me/your_search_group")]) 
+            buttons.append([
+                InlineKeyboardButton(
+                    text=f"{media_icon} {file_name}",
+                    # ഫയലിന്റെ message_id ഉപയോഗിച്ച് കോൾബാക്ക് ഡാറ്റ 64 ബൈറ്റിൽ കുറവാക്കുന്നു
+                    callback_data=f"getmsg_{file.get('message_id')}" 
+                )
+            ])
+        
+        if len(files) == 10:
+             buttons.append([InlineKeyboardButton("കൂടുതൽ ഫലങ്ങൾ", url="https://t.me/your_search_group")]) 
 
-            sent_message = await message.reply_text(
-                text=text,
-                reply_markup=InlineKeyboardMarkup(buttons),
-                disable_web_page_preview=True
-            )
-            
-            print(f"DEBUG: Filter results sent for query '{query}'. Starting autodelete timer.")
-            
-            # --- Autodelete Logic (after 60 seconds) ---
-            await asyncio.sleep(60)
-            try:
-                await sent_message.delete()
-                print("DEBUG: Autodelete completed.")
-            except Exception as e:
-                print(f"Error during autodelete: {e}")
-                
-        elif is_private:
-            # Send a "not found" message only in private chats
-            await message.reply_text(f"❌ File not found for: **{query}**.\nPlease check your spelling.")
-                
-    elif is_private:
-        # Not subscribed (in private chat)
-        if not FORCE_SUB_CHANNEL: return
-        
-        join_button = [
-            [InlineKeyboardButton("Join Channel to Get Files", url=f"https://t.me/{FORCE_SUB_CHANNEL.replace('@', '')}")]
-        ]
-        await message.reply_text(
-            f"Please join our channel first to receive the files.",
-            reply_markup=InlineKeyboardMarkup(join_button)
+        sent_message = await message.reply_text(
+            text=text,
+            reply_markup=InlineKeyboardMarkup(buttons),
+            disable_web_page_preview=True
         )
+        
+        print(f"DEBUG: '{query}' എന്ന തിരച്ചിലിനുള്ള ഫിൽട്ടർ ഫലങ്ങൾ അയച്ചു. ഓട്ടോഡിലീറ്റ് ടൈമർ ആരംഭിക്കുന്നു.")
+        
+        # --- ഓട്ടോഡിലീറ്റ് ലോജിക് (60 സെക്കൻഡിന് ശേഷം) ---
+        await asyncio.sleep(60)
+        try:
+            await sent_message.delete()
+            print("DEBUG: ഓട്ടോഡിലീറ്റ് പൂർത്തിയായി.")
+        except Exception as e:
+            print(f"ഓട്ടോഡിലീറ്റിനിടയിലെ പിശക്: {e}")
+            
+    # ഫയൽ ഗ്രൂപ്പിൽ/ചാനലിൽ കണ്ടെത്താനായില്ലെങ്കിൽ "നോട്ട് ഫൗണ്ട്" മെസ്സേജ് അയക്കുന്നത് ഒഴിവാക്കുന്നു.
+                
+# --- കോൾബാക്ക് ക്വറി ഹാൻഡ്ലർ (ഇൻലൈൻ ബട്ടൺ ക്ലിക്ക്) ---
 
-# --- Callback Query Handler (Inline Button Click) ---
-
-@app.on_callback_query(filters.regex("^getfile_"))
+@app.on_callback_query(filters.regex("^getmsg_")) 
 async def send_file_handler(client, callback):
-    """Sends the file when the inline button is clicked."""
+    """ഇൻലൈൻ ബട്ടൺ ക്ലിക്കുചെയ്യുമ്പോൾ ഫയൽ സ്വകാര്യമായി അയയ്ക്കുന്നു."""
     
-    # Force subscribe check
-    if FORCE_SUB_CHANNEL and not await is_subscribed(client, callback.from_user.id):
-        await callback.answer("Join the channel to get the file.", show_alert=True)
+    user_id = callback.from_user.id
+    
+    # ഫോഴ്സ് സബ്സ്ക്രൈബ് പരിശോധന
+    if FORCE_SUB_CHANNEL and not await is_subscribed(client, user_id):
+        # ഉപയോക്താവ് സബ്സ്ക്രൈബ് ചെയ്തിട്ടില്ലെങ്കിൽ
+        join_button = [
+            [InlineKeyboardButton("ചാനലിൽ അംഗമാകുക", url=f"https://t.me/{FORCE_SUB_CHANNEL.replace('@', '')}")]
+        ]
+        await callback.answer("ഫയൽ ലഭിക്കാൻ ചാനലിൽ അംഗമാകുക.", show_alert=True)
+        # DM-ൽ സബ്സ്ക്രൈബ് ചെയ്യാൻ ആവശ്യപ്പെടുന്ന സന്ദേശം അയയ്ക്കുന്നു
+        try:
+            await client.send_message(
+                chat_id=user_id,
+                text=f"നിങ്ങൾ ചാനലിൽ അംഗമായിട്ടില്ല. ഫയൽ ലഭിക്കാൻ ദയവായി {FORCE_SUB_CHANNEL} എന്ന ചാനലിൽ ജോയിൻ ചെയ്യുക.",
+                reply_markup=InlineKeyboardMarkup(join_button)
+            )
+        except Exception:
+             # യൂസർ ബോട്ടിൽ start ചെയ്തിട്ടില്ലെങ്കിൽ സന്ദേശം അയക്കാൻ കഴിയില്ല
+             pass 
         return
 
-    file_id = callback.data.split("_")[1]
-    file = await db.files_col.find_one({"file_id": file_id}) 
+    # കോൾബാക്ക് ഡാറ്റയിൽ നിന്ന് message_id വേർതിരിച്ചെടുക്കുന്നു
+    message_id_str = callback.data.split("_")[1]
+    message_id = int(message_id_str)
+    
+    # message_id ഉപയോഗിച്ച് ഡാറ്റാബേസിൽ ഫയൽ കണ്ടെത്തുന്നു
+    file = await db.files_col.find_one({"message_id": message_id}) 
     
     if file:
         try:
-            # Forward the file from the original store channel
+            # ഫയൽ ഒറിജിനൽ സ്റ്റോർ ചാനലിൽ നിന്ന് യൂസറിൻ്റെ പ്രൈവറ്റ് ചാറ്റിലേക്ക് ഫോർവേഡ് ചെയ്യുന്നു
             await client.forward_messages(
-                chat_id=callback.message.chat.id,
+                chat_id=user_id, # <-- യൂസറിൻ്റെ പ്രൈവറ്റ് ചാറ്റ് ഐഡി
                 from_chat_id=file['chat_id'],
                 message_ids=file['message_id']
             )
-            await callback.answer("File has been sent.", show_alert=False)
+            # യൂസറിൻ്റെ പ്രൈവറ്റ് ചാറ്റിൽ സ്ഥിരീകരണ സന്ദേശം അയയ്ക്കുന്നു
+            await client.send_message(user_id, "✅ നിങ്ങൾ ആവശ്യപ്പെട്ട ഫയൽ ലഭിച്ചു.")
+            
+            await callback.answer("ഫയൽ നിങ്ങളുടെ പ്രൈവറ്റ് ചാറ്റിലേക്ക് അയച്ചിരിക്കുന്നു.", show_alert=True)
+            
         except Exception as e:
-            await callback.answer("An error occurred while sending the file. Check bot access.", show_alert=True)
-            print(f"File forward error: {e}")
+            # ഫോർവേഡിംഗ് പരാജയപ്പെട്ടാൽ (ഉദാഹരണത്തിന്, യൂസർ ബോട്ടിനെ ബ്ലോക്ക് ചെയ്തു)
+            await callback.answer("ഫയൽ അയക്കുന്നതിൽ പിശക് സംഭവിച്ചു. ദയവായി ബോട്ടിൽ /start കമാൻഡ് അയച്ച് പ്രൈവറ്റ് ചാറ്റ് ആരംഭിക്കുക.", show_alert=True)
+            print(f"യൂസർക്ക് {user_id} ഫയൽ ഫോർവേഡ് ചെയ്യുന്നതിൽ പിശക്: {e}")
     else:
-        await callback.answer("The file was removed from the database.", show_alert=True)
+        await callback.answer("ഈ ഫയൽ ഡാറ്റാബേസിൽ നിന്ന് നീക്കം ചെയ്തിരിക്കുന്നു.", show_alert=True)
     
+    # ഗ്രൂപ്പിലെ/ചാനലിലെ മെസ്സേജ് ഡിലീറ്റ് ചെയ്യുന്നു
     try:
         await callback.message.delete()
     except Exception as e:
-        print(f"Error deleting inline message: {e}")
+        print(f"ഇൻലൈൻ മെസ്സേജ് ഡിലീറ്റ് ചെയ്യുന്നതിലെ പിശക്: {e}")
 
-# --- Render Webhook Setup (FastAPI for a scalable deployment) ---
+# --- റെൻഡർ വെബ്ഹുക്ക് സജ്ജീകരണം (FastAPI) ---
 
-# --- STARTUP/SHUTDOWN Lifecycle ---
+# --- സ്റ്റാർട്ടപ്പ്/ഷട്ട്ഡൗൺ ലൈഫ് സൈക്കിൾ ---
 async def startup_initial_checks():
-    """Checks to run on startup."""
-    print("Running initial startup checks...")
+    """സ്റ്റാർട്ടപ്പിൽ പ്രവർത്തിപ്പിക്കേണ്ട പരിശോധനകൾ."""
+    print("പ്രാരംഭ സ്റ്റാർട്ടപ്പ് പരിശോധനകൾ നടത്തുന്നു...")
     try:
         files_count = await db.files_col.count_documents({})
-        print(f"Database check completed. Found {files_count} files in the database.")
+        print(f"ഡാറ്റാബേസ് പരിശോധന പൂർത്തിയായി. ഡാറ്റാബേസിൽ {files_count} ഫയലുകൾ കണ്ടെത്തി.")
     except Exception as e:
-        print(f"Warning: Database check failed during startup: {e}")
+        print(f"മുന്നറിയിപ്പ്: സ്റ്റാർട്ടപ്പിൽ ഡാറ്റാബേസ് പരിശോധന പരാജയപ്പെട്ടു: {e}")
 
 
 @asynccontextmanager
@@ -414,44 +427,44 @@ async def lifespan(web_app: FastAPI):
     if WEBHOOK_URL_BASE:
         await app.start() 
         await app.set_webhook(url=f"{WEBHOOK_URL_BASE}{WEBHOOK_PATH}")
-        print(f"Webhook set successfully to: {WEBHOOK_URL_BASE}{WEBHOOK_PATH}")
+        print(f"വെബ്ഹുക്ക് വിജയകരമായി സജ്ജീകരിച്ചു: {WEBHOOK_URL_BASE}{WEBHOOK_PATH}")
     else:
         await app.start()
-        print("Starting in Polling Mode (for local testing only).")
+        print("പോളിംഗ് മോഡിൽ ആരംഭിക്കുന്നു (ലോക്കൽ ടെസ്റ്റിംഗിന് മാത്രം).")
         
     yield
     await app.stop()
-    print("Application stopped.")
+    print("ആപ്ലിക്കേഷൻ നിർത്തി.")
 
-# FastAPI instance (Global variable 'api_app' used in uvicorn command)
+# FastAPI ഇൻസ്റ്റൻസ്
 api_app = FastAPI(lifespan=lifespan)
 
-# Webhook endpoint for Telegram updates
+# ടെലിഗ്രാം അപ്ഡേറ്റുകൾക്കായുള്ള വെബ്ഹുക്ക് എൻഡ്പോയിന്റ്
 @api_app.post(WEBHOOK_PATH)
 async def process_update(request: Request):
-    """Receives and processes Telegram updates."""
+    """ടെലിഗ്രാം അപ്ഡേറ്റുകൾ സ്വീകരിക്കുകയും പ്രോസസ്സ് ചെയ്യുകയും ചെയ്യുന്നു."""
     try:
         req = await request.json()
         await app.process_update(req)
         return Response(status_code=HTTPStatus.OK)
     except Exception as e:
-        print(f"Error processing update: {e}")
+        print(f"അപ്ഡേറ്റ് പ്രോസസ്സ് ചെയ്യുന്നതിൽ പിശക്: {e}")
         return Response(status_code=HTTPStatus.INTERNAL_SERVER_ERROR)
 
-# Health Check endpoint for Render
+# റെൻഡർ ഹെൽത്ത് ചെക്ക് എൻഡ്പോയിന്റ്
 @api_app.get("/")
 async def health_check():
-    """Render Health Check."""
+    """റെൻഡർ ഹെൽത്ത് ചെക്ക്."""
     return {"status": "ok"}
 
-# --- Main Entry Point ---
+# --- പ്രധാന എൻട്രി പോയിൻ്റ് ---
 
 if __name__ == "__main__":
     if WEBHOOK_URL_BASE:
-        # Use uvicorn to serve the FastAPI app (for Render deployment)
+        # FastAPI ആപ്പ് നൽകാൻ uvicorn ഉപയോഗിക്കുന്നു (Render വിന്യാസത്തിനായി)
         uvicorn.run("main:api_app", host="0.0.0.0", port=PORT, log_level="info")
     else:
-        # Use app.run() for local polling mode testing
-        print("Starting Pyrogram in Polling Mode...")
+        # ലോക്കൽ പോളിംഗ് മോഡ് ടെസ്റ്റിംഗിനായി app.run() ഉപയോഗിക്കുന്നു
+        print("പോളിംഗ് മോഡിൽ പൈറോഗ്രാം ആരംഭിക്കുന്നു...")
         asyncio.run(startup_initial_checks())
         app.run()
