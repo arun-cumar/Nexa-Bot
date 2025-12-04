@@ -54,7 +54,7 @@ class AutoFilterBot(Client):
             api_hash=API_HASH,
             bot_token=BOT_TOKEN,
             plugins=dict(root="plugins"),
-            # sleep ആർഗ്യുമെൻ്റ് Pyrogram 2.0+ ൽ നീക്കം ചെയ്തതിനാൽ ഒഴിവാക്കി.
+            # 'sleep' argument removed (Fix 1)
         )
 
 # --- Bot Instance ---
@@ -79,7 +79,7 @@ async def is_subscribed(client, user_id):
 
 async def get_file_details(query):
     """ഡാറ്റാബേസിൽ നിന്ന് ഫയൽ വിവരങ്ങൾ തിരയുന്നു."""
-    cursor = db.files_col.find({ # db.files_col ഉപയോഗിച്ചു
+    cursor = db.files_col.find({ 
         "$or": [
             {"title": {"$regex": query, "$options": "i"}},
             {"caption": {"$regex": query, "$options": "i"}}
@@ -115,7 +115,7 @@ async def index_command(client, message: Message):
             caption = chat_msg.caption.html if chat_msg.caption else None
             
             # ഡാറ്റാബേസിൽ ഫയൽ വിവരങ്ങൾ ചേർക്കുന്നു
-            await db.files_col.update_one( # db.files_col ഉപയോഗിച്ചു
+            await db.files_col.update_one( 
                 {"file_id": file_id},
                 {
                     "$set": {
@@ -136,8 +136,8 @@ async def index_command(client, message: Message):
                  
     await msg.edit_text(f"🎉 ഇൻഡക്സിംഗ് പൂർത്തിയായി! ആകെ {total_files} ഫയലുകൾ ചേർത്തു.")
 
-
-@app.on_message(filters.text & filters.private | filters.group & filters.text & filters.incoming & ~(filters.command)) # <-- ബ്രായ്ക്കറ്റ് ചേർത്ത് Error പരിഹരിച്ചു
+# *** പ്രധാന ഫിൽട്ടർ ഫിക്സ്: filters.command() വിളിക്കുന്നു (Fix 3) ***
+@app.on_message(filters.text & filters.private | filters.group & filters.text & filters.incoming & ~filters.command()) 
 async def auto_filter_handler(client, message: Message):
     """ടെക്സ്റ്റ് മെസ്സേജുകൾ വരുമ്പോൾ ഫിൽട്ടർ ഫയലുകൾ തിരയുന്നു."""
     query = message.text.strip()
@@ -208,7 +208,7 @@ async def send_file_handler(client, callback):
         return
 
     file_id = callback.data.split("_")[1]
-    file = await db.files_col.find_one({"file_id": file_id}) # db.files_col ഉപയോഗിച്ചു
+    file = await db.files_col.find_one({"file_id": file_id}) 
     
     if file:
         try:
@@ -253,6 +253,7 @@ async def lifespan(app: FastAPI):
     
     # 2. Bot തുടങ്ങുമ്പോൾ Webhook സജ്ജമാക്കുക അല്ലെങ്കിൽ Pooling തുടങ്ങുക
     if WEBHOOK_URL_BASE:
+        # ഇത് Render-ൽ വെബ്ഹുക്ക് വഴി പ്രവർത്തിക്കാൻ
         await app.set_webhook(url=f"{WEBHOOK_URL_BASE}{WEBHOOK_PATH}")
         print(f"Webhook set successfully to: {WEBHOOK_URL_BASE}{WEBHOOK_PATH}")
         await app.start()
@@ -296,7 +297,5 @@ if __name__ == "__main__":
     else:
         # ലോക്കൽ ടെസ്റ്റിങ്ങിനായി പൂളിംഗ് മോഡ്
         print("Starting Pyrogram in Polling Mode...")
-        # Polling മോഡിൽ run ചെയ്യുമ്പോൾ, FastAPI Lifespan function വിളിക്കില്ല.
-        # അതുകൊണ്ട് startup_initial_checks ഇവിടെ നേരിട്ട് വിളിക്കണം
         asyncio.run(startup_initial_checks())
         app.run()
