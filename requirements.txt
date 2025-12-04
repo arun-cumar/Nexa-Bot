@@ -1,7 +1,6 @@
 pyrogram
 motor
-pymongo
 uvicorn
 fastapi
 python-dotenv
-cryptography
+tgecrypto
