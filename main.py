@@ -358,17 +358,19 @@ async def global_handler(client, message: Message):
         # Files found: Send inline buttons (Fully English)
         text = f"✅ **Search Results for {query}:**\n\nClick the button below to get the file. The file will be sent to your private chat."
         buttons = []
+        # --- START BUTTON GENERATION LOOP (This creates one button for every file found) ---
         for file in files:
             media_icon = {"document": "📄", "video": "🎬", "audio": "🎵"}.get(file.get('media_type', 'document'), '❓')
             file_name_clean = file.get("title", "File").rsplit('.', 1)[0].strip() 
             
-            # Use a clear, modern button text
+            # One button per file
             buttons.append([
                 InlineKeyboardButton(
                     text=f"{media_icon} {file_name_clean}",
                     callback_data=f"getmsg_{file.get('message_id')}" 
                 )
             ])
+        # --- END BUTTON GENERATION LOOP ---
         
         if len(files) == 10:
              buttons.append([InlineKeyboardButton("More Results ➡️", url="https://t.me/your_search_group")]) 
