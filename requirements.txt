@@ -1,6 +1,5 @@
 pyrogram
-motor
-uvicorn
 fastapi
+uvicorn[standard]
 python-dotenv
-cryptg
+motor
