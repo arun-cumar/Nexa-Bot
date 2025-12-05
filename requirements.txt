@@ -4,4 +4,3 @@ uvicorn
 fastapi
 python-dotenv
 cryptg
-httpx
