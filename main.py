@@ -304,6 +304,42 @@ def get_file_info(message: Message) -> tuple[Union[str, None], Union[str, None],
         return message.audio.file_id, file_name, message.audio
     return None, None, None
 
+async def index_message(message: Message) -> bool:
+    """
+    Indexes a single file message into the database. 
+    Used by both /index (when iterating) and the realtime indexer.
+    """
+    file_id, file_name, file_object = get_file_info(message)
+    
+    if not file_id:
+        # No file media found in the message
+        return False
+
+    # Get caption, use .html for correct formatting in Telegram
+    caption = message.caption.html if message.caption else None
+    
+    try:
+        # Upsert: Add or replace the document based on the unique file_id
+        await db.files_col.update_one( 
+            {"file_id": file_id},
+            {
+                "$set": {
+                    "title": file_name,
+                    "caption": caption,
+                    "file_id": file_id,
+                    # We store the channel ID and message ID to allow copy/forward
+                    "chat_id": message.chat.id, 
+                    "message_id": message.id,
+                    "media_type": file_object.__class__.__name__.lower()
+                }
+            },
+            upsert=True
+        )
+        return True
+    except Exception as db_error:
+        print(f"INDEX_MESSAGE_ERROR: DB write failed for message {message.id}: {db_error}")
+        return False
+
 def create_file_buttons(files: List[Dict[str, Any]], original_msg_id: int, original_chat_id: int):
     """Generates the main file result buttons."""
     buttons = []
