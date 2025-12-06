@@ -2,7 +2,7 @@ import os
 import re
 import asyncio
 import json
-import time # <-- FIX: Added the 'time' module import
+import time 
 from pyrogram import Client, filters
 from pyrogram.enums import ChatType
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, Document, Video, Audio, CallbackQuery
@@ -63,13 +63,13 @@ WEBHOOK_PATH = f"/{BOT_TOKEN}"
 # --- MONGODB SETUP ---
 
 class Database:
-    """Handles database operations for storing file indexes and search cache."""
+    """Handles database operations for storing file indexes, search cache, and bot stats."""
     def __init__(self, uri: str, database_name: str):
         self._client = AsyncIOMotorClient(uri)
         self.db = self._client[database_name]
         self.files_col = self.db["files"]
-        # New collection for caching search queries for pagination
         self.search_cache_col = self.db["search_cache"] 
+        self.stats_col = self.db["stats"] # New collection for stats
 
     async def find_one(self, query: Dict[str, Any]) -> Union[Dict[str, Any], None]:
         """Finds a single document matching the query."""
@@ -83,7 +83,7 @@ class Database:
         """Caches the search query tied to a message ID."""
         await self.search_cache_col.update_one(
             {"_id": message_id},
-            {"$set": {"query": query_text, "timestamp": time.time()}}, # <-- FIX: Changed asyncio.time() to time.time()
+            {"$set": {"query": query_text, "timestamp": time.time()}}, 
             upsert=True
         )
 
@@ -91,6 +91,17 @@ class Database:
         """Retrieves the cached search query."""
         doc = await self.search_cache_col.find_one({"_id": message_id})
         return doc.get('query') if doc else None
+
+    async def increment_start_count(self):
+        """Increments the global bot start count and returns the new count."""
+        result = await self.stats_col.find_one_and_update(
+            {"_id": "start_count"},
+            {"$inc": {"count": 1}},
+            upsert=True,
+            return_document=True # Returns the updated document
+        )
+        # Ensure count is returned, defaulting to 1 if it's the very first start
+        return result.get("count", 1) 
 
 # Database instance
 db = Database(DATABASE_URL, "AutoFilterBot")
@@ -374,7 +385,8 @@ async def handle_send_file(client, user_id, message_id):
         if user_client and ("MESSAGE_PROTECTED" in str(e).upper()):
             print(f"Falling back to user session forwarding for user {user_id}...")
             try:
-                if not user_client.is_running:
+                # FIX: Check for 'is_connected' instead of 'is_running' for Pyrogram V2
+                if not user_client.is_connected:
                      await user_client.start()
                 
                 sent_msgs: List[Message] = await user_client.forward_messages(
@@ -413,6 +425,32 @@ async def handle_send_file(client, user_id, message_id):
             pass
         return False, error_msg
 
+# --- NEW LOGGING FUNCTION FOR /start ---
+
+async def handle_start_log(client, message: Message):
+    """Logs the user who started the bot and the current overall start count."""
+    
+    # 1. Increment Start Count in DB
+    start_count = await db.increment_start_count()
+    
+    user = message.from_user
+    
+    # 2. Create the log message
+    log_text = (
+        f"🤖 **New Bot Start!**\n"
+        f"---------------------------\n"
+        f"👤 **User:** {user.mention} (`{user.id}`)\n"
+        f"🏷️ **Username:** @{user.username or 'N/A'}\n"
+        f"🔢 **Total Starts:** `{start_count}`"
+    )
+
+    # 3. Send to Log Channel
+    if LOG_CHANNEL:
+        try:
+            await client.send_message(LOG_CHANNEL, log_text, disable_web_page_preview=True)
+        except Exception as e:
+            print(f"Error sending start log to LOG_CHANNEL: {e}")
+
 
 # --- START COMMAND (Handles /start and /start payload) ---
 @app.on_message(filters.command("start") & filters.private)
@@ -422,6 +460,9 @@ async def start_command(client, message: Message):
     Checks for a deep-link payload to deliver a file immediately.
     """
     global IS_INDEXING_RUNNING
+    
+    # LOGGING: Call the handler to log the user and count
+    asyncio.create_task(handle_start_log(client, message))
     
     if IS_INDEXING_RUNNING:
         await message.reply_text("Indexing is currently running. Please wait until it is complete.")
@@ -479,6 +520,8 @@ async def start_command(client, message: Message):
 async def index_command(client, message: Message):
     """
     Command to index all files from the file store channel using the user session.
+    
+    FIX: Changed user_client.is_running to user_client.is_connected for Pyrogram V2.
     """
     global IS_INDEXING_RUNNING
     global user_client
@@ -503,7 +546,8 @@ async def index_command(client, message: Message):
     total_messages_processed = 0
     
     try:
-        if not user_client.is_running:
+        # FIX APPLIED HERE: Using is_connected for Pyrogram V2
+        if not user_client.is_connected: 
             await user_client.start() 
 
         # Iterate over chat history of the file store channel
@@ -578,6 +622,7 @@ async def global_handler(client, message: Message):
     if is_copyright_message and is_protected_chat:
         try:
             await message.delete()
+            # Send notification to the LOG_CHANNEL
             await client.send_message(LOG_CHANNEL, f"🚫 **Copyright message deleted!**\n\n**Chat ID:** `{chat_id}`\n**User:** {message.from_user.mention}\n**Message:** `{query}`")
             return
         except Exception as e:
@@ -682,8 +727,6 @@ async def redirect_to_dm_handler(client, callback):
     """
     Handles the initial filter button click and directly redirects the user to DM 
     by answering the callback query with the deep link URL.
-    
-    LOGIC: Admins are excluded from the FORCE_SUB_CHECK; regular users must join.
     """
     global BOT_USERNAME
     user_id = callback.from_user.id
@@ -747,12 +790,20 @@ async def redirect_to_dm_handler(client, callback):
 if __name__ == "__main__":
     if WEBHOOK_URL_BASE:
         # Use uvicorn to serve the FastAPI app (for Render deployment)
+        # CRITICAL: 'main' is used here assuming the file is named 'main.py'
         uvicorn.run("main:api_app", host="0.0.0.0", port=PORT, log_level="info")
     else:
         # Use app.run() for local polling mode testing
         print("Starting Pyrogram in polling mode...")
         # Note: In polling mode, we start the client first then run checks.
-        asyncio.run(app.start())
-        asyncio.run(startup_initial_checks())
-        app.idle()
-
+        async def start_polling():
+            await app.start()
+            if user_client:
+                 await user_client.start()
+            await startup_initial_checks()
+            await app.idle()
+            if user_client:
+                 await user_client.stop()
+            await app.stop()
+        
+        asyncio.run(start_polling())
