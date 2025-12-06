@@ -14,7 +14,7 @@ from fastapi import FastAPI, Request, Response
 from contextlib import asynccontextmanager
 from http import HTTPStatus
 import uvicorn
-import urllib.parse # Added for safely encoding Google search query
+import urllib.parse
 
 # Load variables from the .env file
 load_dotenv()
@@ -556,13 +556,13 @@ async def start_command(client, message: Message):
     
     await message.reply_text(start_text)
 
-# --- NEW: REAL-TIME INDEXER FOR PRIVATE FILE STORE (This was already present and handles the first user request) ---
+# --- NEW: REAL-TIME INDEXER FOR PRIVATE FILE STORE ---
 
 @app.on_message(filters.chat(PRIVATE_FILE_STORE) & (filters.document | filters.video | filters.audio))
 async def realtime_indexer(client, message: Message):
     """
     Handles new file uploads (document, video, audio) in the PRIVATE_FILE_STORE channel 
-    and indexes them immediately into the database. (ഫയൽ അപ്‌ലോഡ് ചെയ്യുമ്പോൾ തന്നെ ഓട്ടോമാറ്റിക് ഇൻഡെക്സിംഗ്)
+    and indexes them immediately into the database.
     """
     if PRIVATE_FILE_STORE == -100:
         print("REALTIME_INDEXER: PRIVATE_FILE_STORE ID not set. Skipping indexing.")
@@ -714,22 +714,22 @@ async def global_handler(client, message: Message):
             disable_web_page_preview=True
         )
     else:
-        # --- NEW: GOOGLE SEARCH FALLBACK (ഫയൽ കണ്ടെത്താൻ പറ്റിയില്ലെങ്കിൽ Google-ൽ തിരയാനുള്ള ബട്ടൺ) ---
+        # --- NEW: GOOGLE SEARCH FALLBACK ---
         # Safely URL encode the query string
         encoded_query = urllib.parse.quote_plus(query)
         google_search_url = f"https://www.google.com/search?q={encoded_query}"
         
         fallback_buttons = InlineKeyboardMarkup([
             [InlineKeyboardButton(
-                text="🌐 Google-ൽ തിരയുക (Search on Google)", 
+                text="🌐 Search on Google", 
                 url=google_search_url
             )]
         ])
         
         fallback_text = (
-            f"😔 **ഫയലുകൾ കണ്ടെത്താനായില്ല** 😔\n\n"
-            f"നിങ്ങൾ തിരഞ്ഞ **'{query}'** എന്ന പേരിന് അനുയോജ്യമായ ഫയലുകൾ ഞങ്ങളുടെ ഡാറ്റാബേസിൽ ലഭ്യമല്ല.\n"
-            f"കൃത്യമായ പേര് ഉപയോഗിച്ച് വീണ്ടും ശ്രമിക്കുക, അല്ലെങ്കിൽ Google-ൽ തിരയുന്നതിനായി താഴെയുള്ള ബട്ടൺ ഉപയോഗിക്കുക."
+            f"😔 **Files Not Found** 😔\n\n"
+            f"No files matching the name **'{query}'** were found in our database.\n"
+            f"Please try again with the exact name, or use the button below to search on Google."
         )
 
         # Send the fallback message and use a scheduled delete for cleanup (10 minutes/600 seconds)
@@ -866,9 +866,12 @@ async def redirect_to_dm_handler(client, callback):
 # --- MAIN ENTRY POINT ---
 
 if __name__ == "__main__":
+    # The variable 'autofilter_bot' should be the name of this Python file (e.g., 'autofilter_bot.py').
+    # I've used 'autofilter_bot' below as a placeholder module name for Uvicorn's import.
     if WEBHOOK_URL_BASE:
         # Use uvicorn to serve the FastAPI app (for Render deployment)
         # CRITICAL: 'main' is used here assuming the file is named 'main.py'
+        # NOTE: You might need to adjust "autofilter_bot:api_app" based on your file name.
         uvicorn.run("autofilter_bot:api_app", host="0.0.0.0", port=PORT, log_level="info")
     else:
         # Use app.run() for local polling mode testing
@@ -885,4 +888,3 @@ if __name__ == "__main__":
             await app.stop()
         
         asyncio.run(start_polling())
-
