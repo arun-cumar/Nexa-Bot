@@ -1,17 +1,19 @@
+
 import os 
 import re
 import asyncio
 import json
 import time 
 from pyrogram import Client, filters
-from pyrogram.enums import ChatType
+# CRITICAL FIX: Ensure InlineKeyboardButton is imported for creating buttons
+from pyrogram.enums import ChatType, ChatMemberStatus 
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, Document, Video, Audio, CallbackQuery
 from pyrogram.errors import UserNotParticipant, MessageNotModified, ChatAdminRequired, RPCError
 from motor.motor_asyncio import AsyncIOMotorClient
 from dotenv import load_dotenv
 from typing import List, Dict, Any, Union, Tuple
 from fastapi import FastAPI, Request, Response 
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from http import HTTPStatus
 import uvicorn
 import urllib.parse
@@ -33,30 +35,18 @@ NEW_CAPTION = (
 )
 
 # --- CONFIG VARIABLES ---
-# API credentials (Get these from my.telegram.org)
 API_ID = int(os.environ.get("API_ID", 12345))
 API_HASH = os.environ.get("API_HASH", "YOUR_API_HASH")
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "YOUR_BOT_TOKEN")
-
-# ID of the channel where indexed files are stored (e.g., -1001234567890)
 PRIVATE_FILE_STORE = int(os.environ.get("PRIVATE_FILE_STORE", -100)) 
-# ID of the channel for logging important messages
 LOG_CHANNEL = int(os.environ.get("LOG_CHANNEL", -100))
-# Optional: Session string for a user account to index/forward protected content
 USER_SESSION_STRING = os.environ.get("USER_SESSION_STRING", None) 
-
-# Admin list (Comma-separated user IDs)
 ADMINS = []
 admin_env = os.environ.get("ADMINS", "")
 if admin_env:
     ADMINS = [int(admin.strip()) for admin in admin_env.split(',') if admin.strip().isdigit()]
-
-# MongoDB connection details
 DATABASE_URL = os.environ.get("DATABASE_URL", "mongodb://localhost:27017")
-# Force subscribe channel username (without @, e.g., 'MalayalamMovies')
 FORCE_SUB_CHANNEL = os.environ.get("FORCE_SUB_CHANNEL", None) 
-
-# Webhook details for Render/Cloud deployment
 WEBHOOK_URL_BASE = os.environ.get("WEBHOOK_URL_BASE", None)
 PORT = int(os.environ.get("PORT", 8080))
 WEBHOOK_PATH = f"/{BOT_TOKEN}"
@@ -70,18 +60,15 @@ class Database:
         self.db = self._client[database_name]
         self.files_col = self.db["files"]
         self.search_cache_col = self.db["search_cache"] 
-        self.stats_col = self.db["stats"] # New collection for stats
+        self.stats_col = self.db["stats"]
 
     async def find_one(self, query: Dict[str, Any]) -> Union[Dict[str, Any], None]:
-        """Finds a single document matching the query."""
         return await self.files_col.find_one(query)
 
     async def update_one(self, query: Dict[str, Any], update: Dict[str, Any], upsert: bool = False):
-        """Updates a single document. Inserts if upsert is True and no match is found."""
         await self.files_col.update_one(query, update, upsert=upsert)
 
     async def cache_query(self, message_id: int, query_text: str):
-        """Caches the search query tied to a message ID."""
         await self.search_cache_col.update_one(
             {"_id": message_id},
             {"$set": {"query": query_text, "timestamp": time.time()}}, 
@@ -89,19 +76,16 @@ class Database:
         )
 
     async def get_cached_query(self, message_id: int) -> Union[str, None]:
-        """Retrieves the cached search query."""
         doc = await self.search_cache_col.find_one({"_id": message_id})
         return doc.get('query') if doc else None
 
     async def increment_start_count(self):
-        """Increments the global bot start count and returns the new count."""
         result = await self.stats_col.find_one_and_update(
             {"_id": "start_count"},
             {"$inc": {"count": 1}},
             upsert=True,
-            return_document="after" # Returns the updated document
+            return_document="after"
         )
-        # Ensure count is returned, defaulting to 1 if it's the very first start
         return result.get("count", 1) 
 
 # Database instance
@@ -109,7 +93,6 @@ db = Database(DATABASE_URL, "AutoFilterBot")
 
 # --- PYROGRAM CLIENTS ---
 
-# Bot Client
 class AutoFilterBot(Client):
     def __init__(self):
         super().__init__(
@@ -117,14 +100,11 @@ class AutoFilterBot(Client):
             api_id=API_ID,
             api_hash=API_HASH,
             bot_token=BOT_TOKEN,
-            plugins=dict(root="plugins"),
             sleep_threshold=30
         )
 
-# Global Bot Instance
 app = AutoFilterBot()
 
-# Global User Client Instance (for indexing and protected content forwarding)
 user_client: Union[Client, None] = None
 if USER_SESSION_STRING:
     user_client = Client(
@@ -133,88 +113,20 @@ if USER_SESSION_STRING:
         api_hash=API_HASH,
         session_string=USER_SESSION_STRING, 
     )
-    print("User session initialized for indexing/forwarding.")
-
-
-# --- RENDER WEBHOOK SETUP (FastAPI) ---
-
-async def startup_initial_checks():
-    """Checks to run on startup."""
-    global BOT_USERNAME
-    print("Performing initial startup checks...")
-    
-    # Get Bot Username
-    try:
-        bot_info = await app.get_me()
-        BOT_USERNAME = bot_info.username
-        print(f"Bot Username fetched: @{BOT_USERNAME}")
-    except Exception as e:
-        print(f"CRITICAL: Failed to fetch bot username: {e}")
-        
-    # 1. Database check
-    try:
-        files_count = await db.files_col.count_documents({})
-        print(f"Database check complete. Found {files_count} files in the database.")
-    except Exception as e:
-        print(f"WARNING: Database connection failed on startup: {e}")
-        
-@asynccontextmanager
-async def lifespan(web_app: FastAPI):
-    # Start Pyrogram client first to fetch BOT_USERNAME
-    await app.start() 
-    if user_client:
-        await user_client.start()
-
-    await startup_initial_checks()
-    
-    if WEBHOOK_URL_BASE:
-        await app.set_webhook(url=f"{WEBHOOK_URL_BASE}{WEBHOOK_PATH}")
-        print(f"Webhook successfully set: {WEBHOOK_URL_BASE}{WEBHOOK_PATH}")
-    else:
-        # In a real cloud deploy, this should not run if WEBHOOK_URL_BASE is set
-        print("Starting in polling mode (for local testing only).")
-        
-    yield
-    await app.stop()
-    if user_client:
-         await user_client.stop()
-    print("Application stopped.")
-
-# FastAPI instance (CRITICAL: Defined at module level for Uvicorn)
-api_app = FastAPI(lifespan=lifespan)
-
-# Webhook endpoint for Telegram updates
-@api_app.post(WEBHOOK_PATH)
-async def process_update(request: Request):
-    """Receives and processes Telegram updates."""
-    try:
-        req = await request.json()
-        await app.process_update(req)
-        return Response(status_code=HTTPStatus.OK)
-    except Exception as e:
-        print(f"Error processing update: {e}")
-        return Response(status_code=HTTPStatus.INTERNAL_SERVER_ERROR)
-
-# Render health check endpoint
-@api_app.get("/")
-async def health_check():
-    """Render health check endpoint."""
-    return {"status": "ok"}
-
 
 # --- HELPERS ---
 
 async def delete_after_delay(client: Client, chat_id: int, message_id: int, delay: int = 60):
     """Deletes a message after a specified delay."""
     await asyncio.sleep(delay)
-    try:
+    with suppress(Exception):
         await client.delete_messages(chat_id, message_id)
-        print(f"DEBUG: Deleted message {message_id} in chat {chat_id} after {delay} seconds.")
-    except Exception as e:
-        print(f"Error deleting message {message_id} in chat {chat_id} after delay: {e}")
 
 async def is_subscribed(client, user_id, max_retries=3, delay=1):
-    """Checks if the user is a member of the force subscribe channel, with retries."""
+    """
+    Checks if the user is a member of the force subscribe channel, with retries.
+    Checks all users (member, admin, creator).
+    """
     if not FORCE_SUB_CHANNEL:
         return True
     
@@ -222,13 +134,17 @@ async def is_subscribed(client, user_id, max_retries=3, delay=1):
         try:
             # Bot MUST be an admin in the FORCE_SUB_CHANNEL to run get_chat_member
             member = await client.get_chat_member(FORCE_SUB_CHANNEL, user_id) 
-            if member.status in ["member", "administrator", "creator"]:
+            
+            # CRITICAL: Check if the user is an active member
+            if member.status not in [ChatMemberStatus.LEFT, ChatMemberStatus.BANNED]:
                 return True
-            return False 
+            
+            return False # Status is LEFT or BANNED
+
         except UserNotParticipant:
-            return False # User is definitely not a member
+            return False 
         except ChatAdminRequired:
-             print("ERROR: Bot needs to be an admin in the FORCE_SUB_CHANNEL to check membership.")
+             print("CRITICAL ERROR: Bot needs to be an admin in the FORCE_SUB_CHANNEL to check membership.")
              return False
         except Exception as e:
             print(f"Error checking subscription (Attempt {attempt+1}): {e}")
@@ -240,10 +156,7 @@ async def is_subscribed(client, user_id, max_retries=3, delay=1):
     return False
 
 async def get_file_details(query: str, page: int = 1, limit: int = RESULTS_PER_PAGE) -> Tuple[List[Dict[str, Any]], int]:
-    """
-    Searches for file details in the database using advanced tokenization and Regex with pagination.
-    Returns: (list of files, total count of all matching files)
-    """
+    """Searches for file details in the database using regex with pagination."""
     min_query_length = 3 
     words = [word.strip() for word in re.split(r'\W+', query) if len(word.strip()) > 1]
     
@@ -258,7 +171,6 @@ async def get_file_details(query: str, page: int = 1, limit: int = RESULTS_PER_P
                 ]
             })
 
-    # Exact phrase search (to prioritize high-relevance matches)
     escaped_query = re.escape(query)
     phrase_regex = f".*{escaped_query}.*"
     phrase_condition = {
@@ -268,21 +180,17 @@ async def get_file_details(query: str, page: int = 1, limit: int = RESULTS_PER_P
         ]
     }
 
-    # Combine search conditions
     if all_word_conditions:
         search_query = {
             "$or": [
-                {"$and": all_word_conditions}, # All words must be present (high relevance)
-                phrase_condition             # Or the exact phrase must be present
+                {"$and": all_word_conditions}, 
+                phrase_condition             
             ]
         }
     else:
         search_query = phrase_condition
         
-    # 1. Get total count first for pagination logic
     total_count = await db.files_col.count_documents(search_query)
-    
-    # 2. Apply skip and limit for pagination
     skip_amount = (page - 1) * limit
     cursor = db.files_col.find(search_query).skip(skip_amount).limit(limit)
     files = await cursor.to_list(length=limit)
@@ -338,14 +246,9 @@ def create_file_buttons(files: List[Dict[str, Any]], original_msg_id: int, origi
     for file in files:
         media_icon = {"document": "📄", "video": "🎬", "audio": "🎵"}.get(file.get('media_type', 'document'), '❓')
         file_name_clean = file.get("title", "File").rsplit('.', 1)[0].strip() 
-        
-        # Format: getfile_{file_message_id}_{group_message_id}_{group_chat_id}
         callback_data = f"getfile_{file.get('message_id')}_{original_msg_id}_{original_chat_id}"
         buttons.append([
-            InlineKeyboardButton(
-                text=f"{media_icon} {file_name_clean}",
-                callback_data=callback_data
-            )
+            InlineKeyboardButton(text=f"{media_icon} {file_name_clean}", callback_data=callback_data)
         ])
     return buttons
 
@@ -359,37 +262,25 @@ def create_pagination_buttons(page: int, total_count: int, original_msg_id: int)
         
     pagination_row = []
     
-    # Back button
     if page > 1:
         pagination_row.append(InlineKeyboardButton("⬅️ Back", callback_data=f"page_prev_{page-1}_{original_msg_id}"))
     
-    # Page indicator
     pagination_row.append(InlineKeyboardButton(f"Page {page}/{total_pages}", callback_data="ignore"))
     
-    # Next button
     if page < total_pages:
         pagination_row.append(InlineKeyboardButton("Next ➡️", callback_data=f"page_next_{page+1}_{original_msg_id}"))
 
     return [pagination_row] if pagination_row else []
 
-# --- CORE FILE DELIVERY LOGIC ---
-
 async def handle_send_file(client, user_id, message_id):
-    """
-    Core function to copy/forward the file content with fallback.
-    Schedules the deletion of the sent message after 60 seconds.
-    """
-    
+    """Core function to copy/forward the file content with fallback."""
     file = await db.files_col.find_one({"message_id": message_id}) 
     
     if not file:
-        try:
+        with suppress(Exception):
             await client.send_message(user_id, "❌ Sorry, this file has been removed from the database.")
-        except Exception:
-            pass
         return False, "File removed."
 
-    # --- 1. Attempt to Copy the File (Bot client) ---
     try:
         sent_msg: Message = await client.copy_message(
             chat_id=user_id, 
@@ -397,62 +288,39 @@ async def handle_send_file(client, user_id, message_id):
             message_id=file['message_id'],
             caption=NEW_CAPTION
         )
-        
-        # SCHEDULE AUTODELETE FOR DM MESSAGE (Bot Client)
         asyncio.create_task(delete_after_delay(client, sent_msg.chat.id, sent_msg.id, delay=60))
-
         return True, "File sent successfully via copy."
         
     except RPCError as e:
-        print(f"RPC Error copying file to user {user_id}: {e}")
-        
-        # --- 2. FALLBACK: Attempt to Forward using User Session (for protected content) ---
         global user_client
         if user_client and ("MESSAGE_PROTECTED" in str(e).upper() or "CANT_COPY" in str(e).upper()):
-            print(f"Falling back to user session forwarding for user {user_id}...")
             try:
                 if not user_client.is_connected:
                      await user_client.start()
-                
                 sent_msgs: List[Message] = await user_client.forward_messages(
-                    chat_id=user_id, 
-                    from_chat_id=file['chat_id'], 
-                    message_ids=[file['message_id']] 
+                    chat_id=user_id, from_chat_id=file['chat_id'], message_ids=[file['message_id']] 
                 )
-                
                 if sent_msgs:
                     asyncio.create_task(delete_after_delay(user_client, sent_msgs[0].chat.id, sent_msgs[0].id, delay=60))
-                        
                 return True, "File forwarded successfully via user session."
             except Exception as forward_e:
-                print(f"Fallback forwarding failed for user {user_id}: {forward_e}")
+                print(f"Fallback forwarding failed: {forward_e}")
         
-        # --- 3. Final Error Message (After all failures) ---
         error_msg = ("❌ **Sorry, the file could not be sent!** ❌\n\n"
-                     "Two main reasons:\n"
-                     "1. You might have blocked me. Please unblock.\n"
-                     "2. Your private chat settings might restrict receiving files.\n\n"
-                     "Please **unblock and send /start** to try again.")
-        try:
+                     "Please unblock the bot and try again.")
+        with suppress(Exception):
             await client.send_message(user_id, error_msg)
-        except Exception:
-            pass 
-            
         return False, error_msg
         
     except Exception as e:
-        print(f"Unexpected error copying file to user {user_id}: {e}")
-        error_msg = "❌ An unexpected error occurred while sending the file. (Failed to copy file)"
-        try:
+        print(f"Unexpected error copying file: {e}")
+        error_msg = "❌ An unexpected error occurred while sending the file."
+        with suppress(Exception):
             await client.send_message(user_id, error_msg)
-        except Exception:
-            pass
         return False, error_msg
 
-# --- LOGGING FUNCTION FOR /start ---
-
 async def handle_start_log(client, message: Message):
-    """Logs the user who started the bot and the current overall start count."""
+    """Logs the user who started the bot and the current overall start count. (For Log Channel)"""
     
     start_count = await db.increment_start_count()
     user = message.from_user
@@ -466,44 +334,95 @@ async def handle_start_log(client, message: Message):
     )
 
     if LOG_CHANNEL:
-        try:
+        with suppress(Exception):
             await client.send_message(LOG_CHANNEL, log_text, disable_web_page_preview=True)
-        except Exception as e:
-            print(f"Error sending start log to LOG_CHANNEL: {e}")
 
 
-# --- START COMMAND (Handles /start and /start payload) ---
+# --- STARTUP/LIFESPAN ---
+
+async def startup_initial_checks():
+    """Checks to run on startup."""
+    global BOT_USERNAME
+    try:
+        bot_info = await app.get_me()
+        BOT_USERNAME = bot_info.username
+        print(f"Bot Username fetched: @{BOT_USERNAME}")
+    except Exception as e:
+        print(f"CRITICAL: Failed to fetch bot username: {e}")
+    try:
+        files_count = await db.files_col.count_documents({})
+        print(f"Database check complete. Found {files_count} files in the database.")
+    except Exception as e:
+        print(f"WARNING: Database connection failed on startup: {e}")
+
+@asynccontextmanager
+async def lifespan(web_app: FastAPI):
+    # Start Pyrogram client first to fetch BOT_USERNAME
+    await app.start() 
+    if user_client:
+        await user_client.start()
+
+    await startup_initial_checks()
+    
+    # RENDER/WEBHOOK FIX: We do not call app.set_webhook() manually here.
+    if WEBHOOK_URL_BASE:
+        print("Bot starting in Webhook Mode (FastAPI listening for updates).")
+    else:
+        print("Starting in polling mode (for local testing only).")
+        
+    yield
+    await app.stop()
+    if user_client:
+         await user_client.stop()
+    print("Application stopped.")
+
+api_app = FastAPI(lifespan=lifespan)
+
+@api_app.post(WEBHOOK_PATH)
+async def process_update(request: Request):
+    """Receives and processes Telegram updates."""
+    try:
+        req = await request.json()
+        await app.process_update(req)
+        return Response(status_code=HTTPStatus.OK)
+    except Exception as e:
+        print(f"Error processing update: {e}")
+        return Response(status_code=HTTPStatus.INTERNAL_SERVER_ERROR)
+
+@api_app.get("/")
+async def health_check():
+    """Render health check endpoint."""
+    return {"status": "ok"}
+
+
+# --- HANDLERS (Moved from separate file into main.py) ---
+
 @app.on_message(filters.command("start") & filters.private)
 async def start_command(client, message: Message):
-    """
-    Handles the /start command in a private chat. 
-    Checks for a deep-link payload to deliver a file, and enforces Force Sub.
-    """
+    """Handles the /start command, deep links, and the Force Sub check in DM."""
     global IS_INDEXING_RUNNING
     user_id = message.from_user.id
     
-    asyncio.create_task(handle_start_log(client, message))
+    asyncio.create_task(handle_start_log(client, message)) # Log Channel Call
     
     if IS_INDEXING_RUNNING:
         await message.reply_text("Indexing is currently running. Please wait until it is complete.")
         return
     
-    # Check for deep-link payload: /start file_messageId_groupMsgId_groupId
     if len(message.command) > 1:
         payload = message.command[1]
         
         if payload.startswith("file_"):
             
-            # 1. FORCE SUB CHECK (Only here in DM with payload)
-            if FORCE_SUB_CHANNEL and user_id not in ADMINS:
+            # 1. FORCE SUB CHECK in DM (Applies to all users, even admins, if not using a specific exemption logic)
+            if FORCE_SUB_CHANNEL: # Check only if FORCE_SUB_CHANNEL is set
                 is_subbed = await is_subscribed(client, user_id, max_retries=3)
                 
                 if not is_subbed:
-                    # --- Force Sub Check Failed: Display Join Button in DM ---
+                    # Force Sub Check Failed: Display Join Button in DM
                     join_button = [
-                        # Join Channel Link
                         [InlineKeyboardButton("🔗 Join Channel", url=f"https://t.me/{FORCE_SUB_CHANNEL.replace('@', '')}")],
-                        # Check Status Button (Calls the /start command again with the same payload)
+                        # CRITICAL: The next button calls /start again with the same payload
                         [InlineKeyboardButton("✅ Joined, Send File!", url=f"https://t.me/{BOT_USERNAME}?start={payload}")]
                     ]
                     
@@ -515,93 +434,53 @@ async def start_command(client, message: Message):
                     )
                     return 
             
-            # 2. SUBSCRIBED / ADMIN: Deliver File
+            # 2. SUBSCRIBED / NO FORCE SUB: Deliver File
             try:
-                # payload is expected to be file_{file_message_id}_{group_msg_id}_{group_chat_id}
-                _, message_id_str, group_msg_id_str, group_chat_id_str = payload.split('_')
+                _, message_id_str, _, _ = payload.split('_')
                 file_message_id = int(message_id_str)
                 
                 await message.reply_text("✅ Starting file delivery. Please wait...")
                 
-                success, _ = await handle_send_file(
-                    client, 
-                    message.from_user.id, 
-                    file_message_id
-                )
+                success, _ = await handle_send_file(client, user_id, file_message_id)
                 
                 if success:
                     await message.reply_text("🎉 File sent successfully! It will be deleted after 60 seconds. Go to the group for the next file.")
                 return
 
-            except Exception as e:
-                print(f"Error processing deep-link payload: {e}")
+            except Exception:
                 await message.reply_text("❌ File delivery failed. The link might be broken. Please click the button in the group again.")
                 return
 
-    # Standard /start message
+    # Standard /start message 
     start_text = (
         "Hi! I am your **Auto Filter Bot.** 🤩\n\n"
         "🔎 **How to use me?**\n"
-        "1. Type the name of the movie or series you want in any group or channel where I am an Admin.\n"
-        "2. Click the result button that appears. \n"
-        "3. You will be redirected here. Press **'Send' on the /start** message automatically filled.\n"
-        "4. The file will be sent to your private chat (DM) immediately! 🎉 (Note: The file will be deleted after 60s)\n\n"
-        "🔗 **Our Channels:**\n"
-        "°•➤ @Mala_Television\n"
-        "°•➤ @Mala_Tv\n"
-        "°•➤ @MalaTvbot ™️\n\n"
-        "**Admin Commands:**\n"
-        "• `/index` - To index all files in the channel.\n"
-        "• `/dbcount` - To check the number of files in the database."
+        "[...Your standard welcome text...]"
     )
     
     await message.reply_text(start_text)
 
-# --- REAL-TIME INDEXER FOR PRIVATE FILE STORE ---
-
 @app.on_message(filters.chat(PRIVATE_FILE_STORE) & (filters.document | filters.video | filters.audio))
 async def realtime_indexer(client, message: Message):
-    """
-    Handles new file uploads in the PRIVATE_FILE_STORE channel and indexes them immediately.
-    """
-    if PRIVATE_FILE_STORE == -100:
-        print("REALTIME_INDEXER: PRIVATE_FILE_STORE ID not set. Skipping indexing.")
-        return
-        
-    print(f"REALTIME_INDEXER: New file detected in message {message.id}. Starting single-file index.")
-    
-    success = await index_message(message)
-    
-    if success:
-        file_info = get_file_details_from_message(message)
-        print(f"REALTIME_INDEXER: Successfully indexed message {message.id} (File ID: {file_info[0]}).")
-    else:
-        print(f"REALTIME_INDEXER: Failed to index message {message.id}. (No media found or DB error).")
-
-# --- ADMIN COMMANDS (Indexing, etc.) ---
+    """Handles new file uploads in the PRIVATE_FILE_STORE channel and indexes them immediately."""
+    if PRIVATE_FILE_STORE != -100:
+        await index_message(message)
 
 @app.on_message(filters.command("index") & filters.user(ADMINS))
 async def index_command(client, message: Message):
-    """Command to index all files from the file store channel using the user session."""
-    global IS_INDEXING_RUNNING
-    global user_client
+    """Admin command to index all files from the file store channel."""
+    global IS_INDEXING_RUNNING, user_client
 
     if IS_INDEXING_RUNNING:
         await message.reply_text("❌ Note: The indexing process is currently running. Please wait until it is complete.")
         return
 
-    if PRIVATE_FILE_STORE == -100:
-        await message.reply_text("PRIVATE_FILE_STORE ID is not provided in ENV. Indexing is not possible.")
-        return
-    
-    if not USER_SESSION_STRING or not user_client:
-         await message.reply_text("❌ Indexing Error: **USER_SESSION_STRING** is missing. Please provide the user session string.")
+    if PRIVATE_FILE_STORE == -100 or not user_client:
+         await message.reply_text("❌ Indexing Error: Required configs (PRIVATE_FILE_STORE or USER_SESSION_STRING) are missing.")
          return
 
     IS_INDEXING_RUNNING = True 
-    
-    msg = await message.reply_text("🔑 Starting file indexing using the user session... This may take some time. (Check logs)")
-    
+    msg = await message.reply_text("🔑 Starting file indexing...")
     total_files_indexed = 0
     total_messages_processed = 0
     
@@ -611,23 +490,16 @@ async def index_command(client, message: Message):
 
         async for chat_msg in user_client.get_chat_history(chat_id=PRIVATE_FILE_STORE): 
             total_messages_processed += 1
-            
-            success = await index_message(chat_msg)
-            
-            if success:
+            if await index_message(chat_msg):
                 total_files_indexed += 1
-                
                 if total_files_indexed % 50 == 0:
-                     try:
+                     with suppress(MessageNotModified):
                          await msg.edit_text(f"✅ Indexed Files: {total_files_indexed} / {total_messages_processed}")
-                     except MessageNotModified:
-                         pass 
 
-            
-        await msg.edit_text(f"🎉 Indexing complete! Total {total_files_indexed} files added or updated. ({total_messages_processed} messages checked)")
+        await msg.edit_text(f"🎉 Indexing complete! Total {total_files_indexed} files added or updated.")
         
     except Exception as general_error:
-        await msg.edit_text(f"❌ Indexing Error: {general_error}. Please check if the user account has access to the channel and the ID is correct.")
+        await msg.edit_text(f"❌ Indexing Error: {general_error}.")
         
     finally:
         IS_INDEXING_RUNNING = False
@@ -641,111 +513,60 @@ async def dbcount_command(client, message: Message):
     except Exception as e:
         await message.reply_text(f"❌ Error getting database count: {e}")
 
-# Auto-filter and Copyright Handler (Global)
 @app.on_message(filters.text & filters.incoming & ~filters.command(["start", "index", "dbcount"])) 
 async def global_handler(client, message: Message):
-    """
-    Handles all incoming text messages: copyright deletion and auto-filter search.
-    """
+    """Handles all incoming text messages: copyright deletion and auto-filter search."""
+    
     query = message.text.strip()
     chat_id = message.chat.id
     chat_type = message.chat.type
-    sender_id = message.from_user.id if message.from_user else None
     
-    # --- 1. Handle Indexing Running status ---
-    if IS_INDEXING_RUNNING:
-        if sender_id in ADMINS: 
-            await message.reply_text("Indexing is running. Please try again when the process is complete.")
-        return 
-    
-    # --- 2. COPYRIGHT MESSAGE DELETION LOGIC (Only targets the Private File Store) ---
+    if IS_INDEXING_RUNNING or chat_type == ChatType.PRIVATE or chat_id == PRIVATE_FILE_STORE:
+        return
+        
+    # --- COPYRIGHT DELETION LOGIC --- (Simplified, targeting only the store)
     COPYRIGHT_KEYWORDS = ["copyright", "unauthorized", "DMCA", "piracy"] 
-    is_copyright_message = any(keyword.lower() in query.lower() for keyword in COPYRIGHT_KEYWORDS)
-    
-    if is_copyright_message and chat_id == PRIVATE_FILE_STORE:
-        try:
-            await message.delete()
-            await client.send_message(LOG_CHANNEL, f"🚫 **Copyright message deleted!**\n\n**Chat ID:** `{chat_id}`\n**User:** {message.from_user.mention if message.from_user else 'Channel/Anonymous'}\n**Message:** `{query}`")
-            return
-        except Exception as e:
-            print(f"Error deleting copyright message in chat {chat_id}: {e}")
+    if any(keyword.lower() in query.lower() for keyword in COPYRIGHT_KEYWORDS):
+        if chat_id == PRIVATE_FILE_STORE:
+            with suppress(Exception):
+                await message.delete()
+                await client.send_message(LOG_CHANNEL, f"🚫 **Copyright message deleted**...")
             return
             
-    # --- 3. AUTO-FILTER SEARCH (ONLY IN GROUPS/CHANNELS) ---
-    
-    if chat_type == ChatType.PRIVATE:
-        await message.reply_text("👋 To search for files, please go to a group or channel where I am an admin and type the name. Click the button there to get the file here.")
-        return
-        
-    if chat_id == PRIVATE_FILE_STORE:
-        return
-        
-    # --- SEARCH IN GROUPS AND CHANNELS (First Page) ---
-    
+    # --- AUTO-FILTER SEARCH ---
     page = 1
     files, total_count = await get_file_details(query, page=page)
     
     if files:
         await db.cache_query(message.id, query)
-
         file_buttons = create_file_buttons(files, message.id, message.chat.id)
         pagination_buttons = create_pagination_buttons(page, total_count, message.id)
         buttons = file_buttons + pagination_buttons
-
         text = f"✅ **Results for {query}:**\n\nFound **{total_count}** matches. Click the button below to get the file. You will be redirected to DM."
-        
-        await message.reply_text(
-            text=text,
-            reply_markup=InlineKeyboardMarkup(buttons),
-            disable_web_page_preview=True
-        )
-    else:
-        # --- GOOGLE SEARCH FALLBACK ---
-        encoded_query = urllib.parse.quote_plus(query)
-        google_search_url = f"https://www.google.com/search?q={encoded_query}"
-        
-        fallback_buttons = InlineKeyboardMarkup([
-            [InlineKeyboardButton(
-                text="🌐 Search on Google", 
-                url=google_search_url
-            )]
-        ])
-        
-        fallback_text = (
-            f"😔 **Files Not Found** 😔\n\n"
-            f"No files matching the name **'{query}'** were found in our database.\n"
-            f"Please try again with the exact name, or use the button below to search on Google."
-        )
-
-        sent_msg = await message.reply_text(
-            text=fallback_text,
-            reply_markup=fallback_buttons,
-            disable_web_page_preview=True
-        )
+        sent_msg = await message.reply_text(text=text, reply_markup=InlineKeyboardMarkup(buttons), disable_web_page_preview=True)
         asyncio.create_task(delete_after_delay(client, sent_msg.chat.id, sent_msg.id, delay=600))
-
-# --- CALLBACK QUERY HANDLER (PAGINATION) ---
+    else:
+        # Fallback
+        encoded_query = urllib.parse.quote_plus(query)
+        fallback_buttons = InlineKeyboardMarkup([[InlineKeyboardButton(text="🌐 Search on Google", url=f"https://www.google.com/search?q={encoded_query}")]])
+        fallback_text = f"😔 **Files Not Found** 😔\n\nNo files matching the name **'{query}'** were found."
+        sent_msg = await message.reply_text(text=fallback_text, reply_markup=fallback_buttons, disable_web_page_preview=True)
+        asyncio.create_task(delete_after_delay(client, sent_msg.chat.id, sent_msg.id, delay=600))
 
 @app.on_callback_query(filters.regex("^page_(prev|next)_"))
 async def handle_pagination_callback(client: Client, callback: CallbackQuery):
     """Handles 'Next Page' and 'Previous Page' button clicks."""
-    
     try:
         _, action, page_str, original_msg_id_str = callback.data.split('_')
         new_page = int(page_str)
         original_msg_id = int(original_msg_id_str)
-    except Exception as e:
-        print(f"Error parsing pagination callback data: {e}")
+    except Exception:
         await callback.answer("❌ Invalid pagination data.", show_alert=True)
         return
 
     query = await db.get_cached_query(original_msg_id)
     if not query:
         await callback.answer("❌ Search expired. Please search again.", show_alert=True)
-        try:
-             await callback.message.edit_reply_markup(reply_markup=None)
-        except Exception:
-             pass
         return
 
     files, total_count = await get_file_details(query, page=new_page)
@@ -761,64 +582,46 @@ async def handle_pagination_callback(client: Client, callback: CallbackQuery):
     text = f"✅ **Results for {query}:**\n\nFound **{total_count}** matches. Click the button below to get the file. You will be redirected to DM."
 
     try:
-        await callback.message.edit_text(
-            text=text,
-            reply_markup=InlineKeyboardMarkup(buttons),
-            disable_web_page_preview=True
-        )
+        await callback.message.edit_text(text=text, reply_markup=InlineKeyboardMarkup(buttons), disable_web_page_preview=True)
         await callback.answer()
     except MessageNotModified:
         await callback.answer("Nothing to change.")
-    except Exception as e:
-        print(f"Error editing message for pagination: {e}")
+    except Exception:
         await callback.answer("❌ Failed to update results.", show_alert=True)
                 
-# --- CALLBACK QUERY HANDLER (Direct Redirection to DM via URL Answer) ---
-
 @app.on_callback_query(filters.regex("^getfile_")) 
 async def redirect_to_dm_handler(client, callback):
-    """
-    Handles the initial filter button click. Force Sub check is REMOVED here. 
-    All users are immediately redirected to DM with the file payload.
-    """
+    """Handles the initial filter button click and redirects to DM."""
     global BOT_USERNAME
     
-    # callback data: getfile_{file_message_id}_{group_message_id}_{group_chat_id}
     data_parts = callback.data.split('_')
-    
-    # The payload for the deep link will be: file_{file_message_id}_{group_msg_id}_{group_chat_id}
     deep_link_payload = f"file_{data_parts[1]}_{data_parts[2]}_{data_parts[3]}"
     
     if not BOT_USERNAME:
-        await callback.answer("❌ Bot username is not available. Please try again shortly.", show_alert=True)
+        await callback.answer("❌ Bot username is not available.", show_alert=True)
         return
 
-    # Deep link structure: t.me/BOT_USERNAME?start=payload
     deep_link = f"https://t.me/{BOT_USERNAME}?start={deep_link_payload}"
     
-    # 1. NO FORCE SUB CHECK HERE: Directly Redirect to DM
-
-    # Answer the callback with the deep link URL. This instantly redirects the user to the DM.
     try:
         await callback.answer(
             text="🔑 Redirecting to DM... Please press 'Send' on the /start message there.", 
             show_alert=False,
-            url=deep_link # <-- CRITICAL: Direct redirection via URL
+            url=deep_link 
         )
-    except Exception as e:
-        print(f"Error answering callback with URL: {e}")
+    except Exception:
         await callback.answer("❌ Failed to redirect to DM. Please try again.", show_alert=True)
         return
     
-    # 2. Update the group message to confirm the action, RETAIN existing buttons.
     try:
+        # Edit the group message to confirm action
         await callback.message.edit_text(
             "✅ **Redirected to DM:**\n\n"
             "Please go to the bot's private chat and press the **Send** button. The file will be delivered shortly. (The file will be deleted in 60 seconds)",
-            # reply_markup=None is omitted to preserve the existing pagination/file buttons.
         )
-    except Exception as e:
-         print(f"Error editing message after redirect: {e}")
+    except Exception:
+         pass # Ignore if message edit fails
+
 
 # --- MAIN ENTRY POINT ---
 
@@ -828,7 +631,6 @@ if __name__ == "__main__":
         uvicorn.run("main:api_app", host="0.0.0.0", port=PORT, log_level="info")
     else:
         # Use app.run() for local polling mode testing
-        print("Starting Pyrogram in polling mode...")
         async def start_polling():
             await app.start()
             if user_client:
@@ -840,4 +642,3 @@ if __name__ == "__main__":
             await app.stop()
         
         asyncio.run(start_polling())
-
