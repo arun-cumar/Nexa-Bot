@@ -1,11 +1,11 @@
 {
-  "name": "Asura-MD",
+  "name": "Nexa-Bot-MD",
   "version": "v2.0",
   "description": "nexa Whatsapp  Bot by arun•°Cumar & Ansad",
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "start": "node index.js"
+    "start": "node main.js"
   },
   "dependencies": {
     "@whiskeysockets/baileys": "^7.0.0-rc.9",
