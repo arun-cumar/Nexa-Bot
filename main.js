@@ -52,12 +52,14 @@ async function startNexa() {
         browser: ["Ubuntu", "Chrome", "20.0.04"]
     });
 
-    if (!sock.authState.creds.registered) {
+        const credsFile = path.join(sessionPath, "creds.json");
+       if (!fs.existsSync(credsFile) || !sock.authState.creds.registered) {
+        console.log("\x1b[33mℹ️ No session found. Starting pairing code mode...\x1b[0m");
         const phoneNumber = await question("\n📞 Enter Phone Number with Country Code (91xxxx): ");
         const code = await sock.requestPairingCode(phoneNumber.replace(/[^0-9]/g, ""));
         console.log(`\n🗝 Pairing Code: ${code}\n`);
     }
-    
+   
      //connection 
     connectionHandler(sock, startNexa, saveCreds);
      //message 
@@ -82,3 +84,4 @@ async function startNexa() {
 }
 
 startNexa();
+
