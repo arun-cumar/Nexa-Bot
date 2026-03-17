@@ -1,9 +1,10 @@
 import path from "path";
 import { pathToFileURL } from "url";
 import fs from "fs";
-import { getToggles, saveToggles } from "./lib/toggles.js";
+import { getToggles, saveToggles } from "./library/toggles.js";
 import { parseMessage } from "./lib/msgHelper.js";
 import { checkMode } from "./lib/mode.js";
+import { executeCommand } from "./lib/loader.js";
 
 export default async (sock, chatUpdate) => {
     try {
@@ -36,16 +37,9 @@ export default async (sock, chatUpdate) => {
 
         if (!isCmd) return;
 
-        // 4. Command Execution (Loader)
-        const commandPath = path.join(process.cwd(), "plugins", `${commandName}.js`);
-        if (fs.existsSync(commandPath)) {
-            const moduleUrl = pathToFileURL(commandPath).href + `?update=${Date.now()}`;
-            const commandModule = await import(moduleUrl);
-            const handler = commandModule.default || commandModule.run;
-
-            if (handler) await handler(sock, msg, args, { toggles });
-        }
-
+        //  Command Execution (Loader)
+         await executeCommand(commandName, sock, msg, args, { toggles });
+                
     } catch (err) {
         console.error("Message Error:", err);
     }
