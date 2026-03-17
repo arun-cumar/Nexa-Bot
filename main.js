@@ -43,7 +43,7 @@ async function startNexa() {
 
         const sock = makeWASocket({
         auth: state,
-        printQRInTerminal: !process.argv.includes('--pairing-code'),
+        printQRInTerminal: false,
         browser: ["Ubuntu", "Chrome", "20.0.04"], 
         logger: pino({ level: 'silent' }) 
     });
