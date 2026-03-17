@@ -1,7 +1,7 @@
 {
   "name": "nexa-bot",
-  "version": "3.0.0",
-  "description": "Nexa WhatsApp Bot with 30+ Plugins (ES Modules)",
+  "version": "v1.0",
+  "description": "Nexa WhatsApp Bot",
   "type": "module",
   "main": "main.js",
   "scripts": {
@@ -18,31 +18,8 @@
     "node": ">=18.0.0"
   },
   "dependencies": {
-    "@hapi/boom": "^10.0.1",
     "@whiskeysockets/baileys": "6.7.2",
     "axios": "^1.6.2",
-    "brainly-scraper": "^2.0.3",
-    "cheerio": "^1.0.0-rc.12",
-    "dotenv": "^16.3.1",
-    "fluent-ffmpeg": "^2.1.2",
-    "fs-extra": "^11.2.0",
-    "google-it": "^1.6.4",
-    "gtts": "^2.0.2",
-    "jimp": "^0.22.10",
-    "mathjs": "^12.4.0",
-    "moment": "^2.29.4",
-    "moment-timezone": "^0.5.43",
-    "mongoose": "^8.0.3",
-    "node-cron": "^3.0.3",
-    "node-fetch": "^3.3.2",
-    "pino": "^8.17.2",
-    "pm2": "^5.3.1",
-    "qrcode": "^1.5.3",
-    "qrcode-terminal": "^0.12.0",
-    "translate-google": "^1.5.0",
-    "weather-js": "^2.0.0",
-    "yt-search": "^2.12.0",
-    "ytdl-core": "^4.11.5"
   },
   "devDependencies": {
     "nodemon": "^3.0.2"
