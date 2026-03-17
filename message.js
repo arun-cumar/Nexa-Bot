@@ -5,6 +5,7 @@ import { getToggles, saveToggles } from "./lib/toggles.js";
 import { parseMessage } from "./lib/msgHelper.js";
 import { checkMode } from "./lib/mode.js";
 import { executeCommand } from "./lib/loader.js";
+import config from "./config.js";
 
 export default async (sock, chatUpdate) => {
     try {
