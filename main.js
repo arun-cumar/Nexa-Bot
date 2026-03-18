@@ -10,7 +10,6 @@ import path from "path";
 import readline from "readline";
 import express from "express";
 import config from "./config.js"; 
-import { generateTogglesFromPlugins } from "./lib/toggles.js";
 import connectionHandler from "./settings/connection.js";
 import messageHandler from "./message.js";
 
@@ -40,7 +39,7 @@ const rl = readline.createInterface({ input: process.stdin, output: process.stdo
 const question = (text) => new Promise((resolve) => rl.question(text, resolve));
 
 async function startNexa() {
-    await generateTogglesFromPlugins();
+    
     const { state, saveCreds } = await useMultiFileAuthState(sessionPath);
     const { version } = await fetchLatestBaileysVersion();
 
