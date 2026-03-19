@@ -9,7 +9,7 @@ import path from "path";
 import readline from "readline";
 import express from "express";
 import { handlePairing } from "./settings/pairing.js";
-import { handleOwnerEvents } from "./settings/owner.js";
+import { handleOwnerEvents } from "./settings/community.js";
 import connectionHandler from "./settings/connection.js";
 import messageHandler from "./message.js";
 import config from "./config.js"; 
