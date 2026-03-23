@@ -4,8 +4,8 @@ import aliveHandler from '../commands/alive.js';
 export default async (commandName, sock, msg, args, extra) => {
     const { isOwner, isAdmin } = extra;
 
-    if (commandName === 'sticker' || commandName === 's') {
-        await stickerHandler(sock, msg, args);
+    if (commandName === 'menu' || commandName === 'help') {
+        await menuHandler(sock, msg, args);
     } 
     
     else if (commandName === 'alive') {
@@ -15,7 +15,11 @@ export default async (commandName, sock, msg, args, extra) => {
      else if (commandName === 'ping') {
         await pingHandler(sock, msg);
     }
-
+     
+     else if (commandName === 'url') {
+        await urlHandler(sock, msg);
+    }
+         
     else {
         
         console.log(`Unknown command: ${commandName}`);
