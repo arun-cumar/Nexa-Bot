@@ -23,9 +23,12 @@ const connection = async (sock, startNexa, saveCreds) => {
             
             const myNumber = sock.user.id.split(':')[0] + "@s.whatsapp.net";
             const activeMsg = `
-╭━━〔 *Nexa-Bot-MD* 〕━━╮
-┃🛠️ STATUS: Online
-┃👤 OWNER: Arun & Ansad
+╭━━〔 ${config.BOT_NAME} 〕━━╮
+┃ 🛠️ STATUS: Online
+┃ 👤 OWNER: ${config.OWNER_NAME}
+┃ 📞 CONTACT: ${config.OWNER_NUMBER}
+┃ ⚡ PREFIX: ${config.PREFIX}
+┃ 📝 DESC: ${config.DESCRIPTION}
 ╰━━━━━━━━━━━━━━━╯`;
 
             try {
