@@ -1,3 +1,4 @@
+// © 2026 arun•°Cumar. All Rights Reserved.
 import makeWASocket, { 
     useMultiFileAuthState, 
     fetchLatestBaileysVersion, 
