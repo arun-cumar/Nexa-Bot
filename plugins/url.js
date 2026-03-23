@@ -34,7 +34,7 @@ export default async (sock, msg, args) => {
             text: responseText,
             contextInfo: {
                 externalAdReply: {
-                    title: "ASURA MEDIA UPLOADER",
+                    title: "Nexa MEDIA UPLOADER",
                     body: "File converted to permanent link",
                     thumbnailUrl: "http://codeskulptor-demos.commondatastorage.googleapis.com/GalaxyInvaders/back03.jpg",
                     sourceUrl: url,
