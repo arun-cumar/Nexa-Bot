@@ -1,6 +1,6 @@
 // © 2026 arun•°Cumar. All Rights Reserved.
 import { downloadContentFromMessage } from '@whiskeysockets/baileys';
-import toSticker from '../lib/emix.js'; 
+import emix from '../lib/emix.js'; 
 
 export default async (sock, msg) => {
     const from = msg.key.remoteJid;
