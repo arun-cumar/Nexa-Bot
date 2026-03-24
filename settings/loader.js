@@ -25,10 +25,6 @@ export default async (commandName, sock, msg, args, extra) => {
         await urlHandler(sock, msg, args, fquoted);
     }
 
-    else if (commandName === 'url') {
-        await urlHandler(sock, msg, args, fquoted);
-    }
-
     else if (commandName === 'sticker') {
         await stickerHandler(sock, msg, args, fquoted);
     }
