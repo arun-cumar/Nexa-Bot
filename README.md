@@ -33,9 +33,11 @@ Before running npm start, ensure you have your environment variables set up (eit
  * PREFIX: The symbol used to trigger commands (e.g., . or !).
  * OWNER_NUMBER: Your WhatsApp number.
 
-🌟 Support the Project
-If you find this bot helpful, please consider giving it a star!
-⭐️ Star This Repo
+## 🌟 Show your support
+
+If you like this project, please give it a [⭐️ Star On Repo](https://github.com/arun-cumar/Nexa-Bot-Md)!
+---
+
 
 ⚠️ Disclaimer
  * Educational Use Only: This bot is developed for educational purposes.
@@ -44,9 +46,6 @@ If you find this bot helpful, please consider giving it a star!
 
 -----
 
-### 💡 Quick Tip for you:
 
-In the cloning step, I noticed in your original text you had `cd Nexa-Bot-Md`, but the repo link ends in `-mdt`. I corrected it to `cd Nexa-Bot-mdt` in this code so the command doesn't fail.
-
-Would you like me to add a **Features** section or a **Commands** list to this README as well?
-
+<img src="https://readme-typing-svg.herokuapp.com?font=Rockstar-ExtraBold&size=50&duration=2000&pause=1000&color=FF0000&center=true&vCenter=true&width=900&height=100&lines=Copyright+©️+2026+arun•°Cumar;All+Rights+Reserved.;⊹₊˚‧︵‿₊୨ᰔ୧₊‿︵‧˚₊⊹;" alt="Typing SVG" />
+</p>
