@@ -1,4 +1,4 @@
-
+// © 2026 arun•°Cumar. All Rights Reserved.
 export const sendInteractiveMessage = async (sock, from, opts = {}) => {
     const {
         title,
