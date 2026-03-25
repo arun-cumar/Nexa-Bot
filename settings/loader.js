@@ -1,5 +1,6 @@
 // © 2026 arun•°Cumar. All Rights Reserved.  
-import { fquoted } from './quoted.js';   
+import { fquoted } from './quoted.js'; 
+import ownerHandler from '.settings/owner.js';
 import menuHandler from '../plugins/menu.js';  
 import aliveHandler from '../plugins/alive.js';  
 import pingHandler from '../plugins/ping.js';  
@@ -15,7 +16,11 @@ export async function executeCommand(commandName, sock, msg, args, extra) {
           
         await menuHandler(sock, msg, args, { isOwner, isAdmin, quoted });  
     }   
-      
+
+    else if (commandName === 'owner') {  
+        await ownerHandler(sock, msg, args, { isOwner, isAdmin, quoted });  
+    }  
+    
     else if (commandName === 'alive') {  
         await aliveHandler(sock, msg, args, { isOwner, isAdmin, quoted });  
     }  
