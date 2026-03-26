@@ -1,3 +1,4 @@
+
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import chalk from 'chalk'; 
@@ -15,7 +16,7 @@ export const getQuoted = (msg) => {
                 newsletterName: "⚡NEXA-BOT-MD OFFICIAL",
                 caption: "🚀 NEXA-BOT-MD : THE NEXT GEN BOT",
                 inviteExpiration: Date.now() + 1800000,
-                 
+                jpegThumbnail: fs.readFileSync('./media/nexa.jpg') 
             }
         }
     };
