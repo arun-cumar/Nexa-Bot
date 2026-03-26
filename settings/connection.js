@@ -3,19 +3,6 @@ import fs from 'fs';
 import config from "../config.js";
 import { DisconnectReason } from '@whiskeysockets/baileys';
 
-const dbPath = './database/connection.json';
-
-function saveConnectionData(data) {
-    let json = {};
-
-    if (fs.existsSync(dbPath)) {
-        json = JSON.parse(fs.readFileSync(dbPath));
-    }
-    
-  const saveConnectionData = (data) => {
-    fs.writeFileSync('./database/connection.json', JSON.stringify(data, null, 2));
-};
-
 const delay = (ms) => new Promise(res => setTimeout(res, ms));
 
 const connection = async (sock, startNexa, saveCreds) => {
@@ -30,26 +17,8 @@ const connection = async (sock, startNexa, saveCreds) => {
 
                 console.log(`❌ Connection Closed. Reason: ${reason}`);
 
-                saveConnectionData({
-                    status: "offline",
-                    lastDisconnect: new Date().toISOString(),
-                    reason: reason
-                });
-
                 if (shouldReconnect) {
                     console.log("🔁 Reconnecting in 5 seconds...");
-
-                    let data = {};
-                    if (fs.existsSync(dbPath)) {
-                        data = JSON.parse(fs.readFileSync(dbPath));
-                    }
-
-                    const reconnects = (data.reconnects || 0) + 1;
-
-                    saveConnectionData({
-                        reconnects: reconnects
-                    });
-
                     await delay(5000);
                     startNexa();
                 } else {
@@ -63,12 +32,6 @@ const connection = async (sock, startNexa, saveCreds) => {
 
             else if (connection === 'open') {
                 console.log('\x1b[36m✅ Nexa-Bot MD Connected Successfully!\x1b[0m');
-
-                saveConnectionData({
-                    status: "online",
-                    lastConnect: new Date().toISOString(),
-                    reconnects: 0
-                });
 
                 const myNumber = sock.user.id.split(':')[0] + "@s.whatsapp.net";
 
