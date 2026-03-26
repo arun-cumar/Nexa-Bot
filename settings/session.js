@@ -13,8 +13,8 @@ export async function handleSession(sock) {
     console.clear();
     console.log(chalk.cyan(`
     ╔══════════════════════════════════════╗
-    ║          🚀 NEXA BOT SYSTEM          ║
-    ║        Developed by arun•°Cumar      ║
+    ║           🚀 NEXA BOT SYSTEM                ║
+    ║        Developed by arun•°Cumar             ║
     ╚══════════════════════════════════════╝
     `));
 
