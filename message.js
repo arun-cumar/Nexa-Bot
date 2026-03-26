@@ -14,6 +14,7 @@ export default async (sock, chatUpdate) => {
         if (!msg || !msg.message || msg.key.remoteJid === "status@broadcast") return;
 
         const from = msg.key.remoteJid;
+        const isGroup = from.endsWith('@g.us');
         const sender = msg.key.participant || msg.key.remoteJid;
         const senderNumber = sender.replace(/\D/g, ''); 
 
@@ -64,6 +65,9 @@ export default async (sock, chatUpdate) => {
         console.error("❌ Message Error:", err);    
     }
 };
+
+
+
 
 
 
