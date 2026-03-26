@@ -11,9 +11,6 @@ import playHandler from '../plugins/play.js';
 export async function handleCommands(commandName, sock, msg, args, extra) {  
     const { isOwner, isAdmin } = extra;  
   
-    //Get quoted 
-    const quoted = getQuoted(msg);   
-  
     // commands checking 
     switch (commandName) {
         case 'menu':
