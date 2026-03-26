@@ -6,6 +6,7 @@ import { checkAdmin, checkOwner } from "./settings/check.js";
 import { getToggles } from "./lib/toggles.js";
 import { parseMessage } from "./settings/msgHelper.js";
 import { handleCommands } from "./settings/loader.js";
+import { handleMentionSticker } from "./settings/mention.js";
 import config from "./config.js";
 
 export default async (sock, chatUpdate) => {
@@ -26,16 +27,8 @@ export default async (sock, chatUpdate) => {
        }
 
         //  Mention Sticker Logic
-        const mentions = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
-        if (mentions.length > 5) {
-            const stickerPath = './media/sticker.webp';
-            if (fs.existsSync(stickerPath)) {
-                await sock.sendMessage(from, {
-                    sticker: fs.readFileSync(stickerPath)
-                }, { quoted: msg });
-            }
-        }
-
+        handleMentionSticker(sock, msg, from);
+        
         // Parse Message    
         const { isCmd, commandName, args } = parseMessage(msg);    
         if (!isCmd || !commandName) return;    
