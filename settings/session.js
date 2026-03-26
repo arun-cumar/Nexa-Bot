@@ -2,61 +2,71 @@
 import chalk from 'chalk';
 import readline from 'readline';
 
-const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout
-});
-
-const question = (text) => new Promise((resolve) => rl.question(text, resolve));
-
 export async function handleSession(sock) {
+    const rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout
+    });
+
+    const question = (text) => new Promise((resolve) => rl.question(text, resolve));
+
     console.clear();
-    console.log(chalk.redBright(`
-╔════════════════════╗
-      NEXA BOT
-      LOGIN MODE
-╚════════════════════╝
-`));
+    console.log(chalk.cyan(`
+    ╔══════════════════════════════════════╗
+    ║          🚀 NEXA BOT SYSTEM          ║
+    ║        Developed by arun•°Cumar      ║
+    ╚══════════════════════════════════════╝
+    `));
 
     if (!sock.authState.creds.registered) {
+        console.log(chalk.whiteBright('   [ SELECT LOGIN METHOD ]\n'));
+        console.log(chalk.green('   1 ➤ ') + chalk.white('Pairing Code (Easy)'));
+        console.log(chalk.green('   2 ➤ ') + chalk.white('QR Code (Fast Scan)'));
+        console.log(chalk.green('   3 ➤ ') + chalk.white('Session ID (Auto Login)\n'));
 
-        console.log(chalk.yellow(`
-1 → Pairing Code
-2 → QR Code
-3 → Session Login
-`));
+        const option = await question(chalk.cyan('   ⚡ Select Option: '));
 
-        const option = await question("Select Login Method: ");
-
-        // Pairing Code
+        // 1. Pairing Code Mode
         if (option === "1") {
-            const phoneNumber = await question("Enter Phone Number (91XXXXXXXXXX): ");
+            const phoneNumber = await question(chalk.yellow('\n   📞 Enter Number (91XXXXXXXXXX): '));
             const cleanNumber = phoneNumber.replace(/[^0-9]/g, '');
 
-            console.log("Generating Pairing Code...");
-            const code = await sock.requestPairingCode(cleanNumber);
+            if (cleanNumber.length < 10) {
+                console.log(chalk.red('   ❌ Invalid Phone Number!'));
+                rl.close();
+                return;
+            }
 
-            console.log(`
-╔════════════════╗
-   PAIRING CODE
-      ${code}
-╚════════════════╝
-`);
+            console.log(chalk.blue('   ⏳ Requesting Pairing Code...'));
+            try {
+                const code = await sock.requestPairingCode(cleanNumber);
+                console.log(chalk.greenBright(`
+    ╔══════════════════════════════════════╗
+    ║        🗝  YOUR PAIRING CODE                ║
+    ╠══════════════════════════════════════╣
+    ║                 ${code}                     ║
+    ╚══════════════════════════════════════╝
+                `));
+                console.log(chalk.gray('   💡 Open WhatsApp > Linked Devices > Link with Phone Number\n'));
+            } catch (err) {
+                console.log(chalk.red('   ❌ Error: ' + err.message));
+            }
         }
 
-        // QR Code
+        // 2. QR Code Mode
         else if (option === "2") {
-            console.log("QR Mode Enabled. Scan QR from WhatsApp.");
-            sock.ev.on('connection.update', ({ qr }) => {
-                if (qr) {
-                    console.log("QR Code received, scan please.");
-                }
-            });
+            console.log(chalk.magenta('\n   📡 QR Mode Activated. Wait for QR to load...'));
+            
         }
 
-        // Session Login
+        // 3. Session Login
         else if (option === "3") {
-            console.log("Session login enabled. Make sure SESSION_ID env added.");
+            console.log(chalk.blue('\n   🔑 Checking Session ID from Environment...'));
+            
+        }
+        
+        else {
+            console.log(chalk.red('\n   ❌ Invalid Option! Please restart.'));
         }
     }
 
