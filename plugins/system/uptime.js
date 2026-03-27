@@ -1,4 +1,4 @@
-import { runtime, timeDesigns } from '../../lib/functions.js';
+import { runtime, timeDesigns } from '../../lib/function.js';
 import fs from 'fs';
 
 export default async (sock, msg) => {
