@@ -1,5 +1,5 @@
 // © 2026 arun•°Cumar. All Rights Reserved.
-import { downloadYt, ytSearch } from '../lib/yt.js';
+import { downloadYt, ytSearch } from '../../lib/yt.js';
 import { toAudio, toPTT } from '../../lib/emix.js';
 import fs from 'fs';
 
