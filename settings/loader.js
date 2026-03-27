@@ -2,7 +2,8 @@
 import ownerHandler from '../plugins/system/owner.js';
 import menuHandler from '../plugins/system/menu.js';  
 import aliveHandler from '../plugins/system/alive.js';  
-import pingHandler from '../plugins/system/ping.js';  
+import pingHandler from '../plugins/system/ping.js'; 
+import uptimeHandler from '../plugins/system/uptime.js';
 import urlHandler from '../plugins/download/url.js';  
 import stickerHandler from '../plugins/download/sticker.js';  
 import videoHandler from '../plugins/download/video.js';  
@@ -29,6 +30,11 @@ export async function handleCommands(commandName, sock, msg, args, extra) {
 
         case 'ping':
             await pingHandler(sock, msg, args, { isOwner, isAdmin });
+            break;
+
+        case 'uptime':
+        case 'runtime':
+            await uptimeHandler(sock, msg, args, { isOwner, isAdmin });
             break;
 
         case 'url':
