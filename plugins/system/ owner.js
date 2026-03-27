@@ -2,7 +2,7 @@ import fs from 'fs';
 
 export default async (sock, msg, args) => {
 const chat = msg.key.remoteJid;
-const thumbPath = './media/nexa.jpg';
+const thumbPath = '../../media/nexa.jpg';
 
 const ownerMsg = ` 
 
