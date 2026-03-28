@@ -1,5 +1,6 @@
 import { runtime, timeDesigns } from '../../lib/nexa/function.js';
 import fs from 'fs';
+import path from 'path';
 
 export default async (sock, msg) => {
     try {
@@ -10,21 +11,28 @@ export default async (sock, msg) => {
         const date = new Date().toLocaleDateString();
         const time = new Date().toLocaleTimeString();
 
-        // Random Design
+        const imagePath = path.join(process.cwd(), 'media', 'nexa.jpg');
+
         const design = timeDesigns[Math.floor(Math.random() * timeDesigns.length)];
-        const imagePath = path.join(__dirname, '../../media/nexa.jpg');
+        
         const timeText = design
             .replace('{user}', user)
             .replace('{uptime}', uptime)
             .replace('{date}', date)
             .replace('{time}', time);
 
-        await sock.sendMessage(from, {
-            image: fs.readFileSync(imagePath),
-            caption: timeText
-        }, { quoted: msg });
+        if (fs.existsSync(imagePath)) {
+            await sock.sendMessage(from, {
+                image: { url: imagePath }, 
+                caption: timeText
+            }, { quoted: msg });
+        } else {
+            await sock.sendMessage(from, { text: timeText }, { quoted: msg });
+        }
 
     } catch (err) {
-        console.log("Uptime Error:", err);
+        console.error("Uptime Error:", err);
     }
 };
+
+
