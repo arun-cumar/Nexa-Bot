@@ -7,74 +7,65 @@ import { menuDesigns } from '../../lib/nexa/menu.js';
 export default async (sock, msg, args) => {
     try {
         const from = msg.key.remoteJid;
-        const sender = msg.key.participant || from;
         const pushName = msg.pushName || "User";
 
-        // Uptime
-        const runtime = process.uptime();
-        const hours = Math.floor(runtime / 3600);
-        const minutes = Math.floor((runtime % 3600) / 60);
-        const seconds = Math.floor(runtime % 60);
-        const uptime = `${hours}h ${minutes}m ${seconds}s`;
-
+        // Time & Date
         const date = new Date().toLocaleDateString();
         const time = new Date().toLocaleTimeString();
 
         const pluginsDir = path.join(process.cwd(), 'plugins');
+        
+        const categories = fs.readdirSync(pluginsDir).filter(file => {
+            return fs.statSync(path.join(pluginsDir, file)).isDirectory();
+        });
 
-        const categories = fs.readdirSync(pluginsDir)
-            .filter(folder => fs.lstatSync(path.join(pluginsDir, folder)).isDirectory());
-
-        let commandList = '';
+        let allCommandsText = '';
         let totalCommands = 0;
 
-        for (const category of categories) {
+        categories.forEach(category => {
             const categoryPath = path.join(pluginsDir, category);
+            const files = fs.readdirSync(categoryPath).filter(file => file.endsWith('.js'));
 
-            const files = fs.readdirSync(categoryPath)
-                .filter(file => file.endsWith('.js') && !file.startsWith('_'));
-
-            if (files.length === 0) continue;
-
-            commandList += `╭───〔 ${category.toUpperCase()} 〕───╮\n`;
-
-            for (const file of files) {
-                const cmdName = file.replace('.js', '');
-                commandList += `│ ${config.PREFIX}${cmdName}\n`;
-                totalCommands++;
+            if (files.length > 0) {
+                allCommandsText += `\n*──『 ${category.toUpperCase()} 』──*\n`;
+                files.forEach(file => {
+                    const cmd = file.replace('.js', '');
+                    allCommandsText += `  ◦ ${config.PREFIX}${cmd}\n`;
+                    totalCommands++;
+                });
             }
-
-            commandList += `╰────────────────╯\n\n`;
-        }
+        });
 
         const randomDesign = menuDesigns[Math.floor(Math.random() * menuDesigns.length)];
 
         const menuText = randomDesign
-            .replace('{bot}', config.BOT_NAME)
-            .replace('{user}', pushName)
-            .replace('{date}', date)
-            .replace('{time}', time)
-            .replace('{uptime}', uptime)
-            .replace('{total}', totalCommands)
-            .replace('{prefix}', config.PREFIX)
-            .replace('{commands}', commandList);
+            .replace(/{bot}/g, config.BOT_NAME || "Nexa-Bot")
+            .replace(/{user}/g, pushName)
+            .replace(/{date}/g, date)
+            .replace(/{prefix}/g, config.PREFIX)
+            .replace(/{commands}/g, allCommandsText);
+
+        const imagePath = path.join(process.cwd(), 'media', 'nexa.jpg');
+        let imageBuffer;
+        if (fs.existsSync(imagePath)) {
+            imageBuffer = fs.readFileSync(imagePath);
+        }
 
         await sock.sendMessage(from, {
             text: menuText,
-            mentions: [sender],
             contextInfo: {
                 externalAdReply: {
-                    title: config.BOT_NAME,
-                    body: "Nexa Menu",
+                    title: config.BOT_NAME || "Nexa-Bot",
+                    body: "Nexa Multi-Device Bot",
                     mediaType: 1,
                     sourceUrl: "https://whatsapp.com/channel/0029VbB59W9GehENxhoI5l24",
-                    thumbnail: fs.readFileSync( path.join(process.cwd(), 'media', 'nexa.jpg'))
+                    thumbnail: imageBuffer 
                 }
             }
         }, { quoted: msg });
 
     } catch (err) {
-        console.log("Menu Error:", err);
-        await sock.sendMessage(msg.key.remoteJid, { text: "❌ Menu error." });
+        console.error("Menu Error:", err);
+        await sock.sendMessage(msg.key.remoteJid, { text: "❌ error." });
     }
 };
