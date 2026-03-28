@@ -13,8 +13,6 @@ import mathHandler from '../plugins/genaral/math.js';
 import restartHandler from '../plugins/system/restart.js';
 import prefixHandler from '../plugins/system/prefix.js';
 import vvHandler from '../plugins/utility/vv.js';
-
-
 // map
 const commands = {
     menu: menuHandler,
