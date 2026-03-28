@@ -1,5 +1,6 @@
 // © 2026 arun•°Cumar. All Rights Reserved.
 import config from "../config.js";
+import { getPrefix } from '../../lib/nexa/settings/ prefix.js';
 
 export const parseMessage = (msg) => {
     const m = msg.message || {};
@@ -20,15 +21,26 @@ export const parseMessage = (msg) => {
 
     const text = body.trim();
     
-    const isCmd = config.PREFIX.split('').some(p => text.startsWith(p));
-    const prefix = isCmd ? config.PREFIX.split('').find(p => text.startsWith(p)) : "";
+    const dynamicPrefix = getPrefix(); 
+    
+    const prefixes = [...config.PREFIX.split(''), dynamicPrefix];
+
+    const isCmd = prefixes.some(p => text.startsWith(p));
+    
+    const prefix = isCmd ? prefixes.find(p => text.startsWith(p)) : "";
+    
     const commandName = isCmd ? text.slice(prefix.length).trim().split(/ +/)[0].toLowerCase() : "";
+   
     const args = text.trim().split(/ +/).slice(1);
+  
     const fullArgs = args.join(" ");
+
     const from = msg.key?.remoteJid;
     
     const isGroup = from?.endsWith("@g.us");
+   
     const sender = isGroup ? msg.key?.participant : from;
+  
     const pushName = msg.pushName || "User";
 
     const quoted = m.extendedTextMessage?.contextInfo?.quotedMessage ? {
@@ -41,6 +53,7 @@ export const parseMessage = (msg) => {
     } : null;
 
     const isMedia = !!(m.imageMessage || m.videoMessage || m.stickerMessage || m.documentMessage);
+  
     const type = Object.keys(m)[0]; 
 
     return {
