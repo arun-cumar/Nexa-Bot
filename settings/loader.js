@@ -10,7 +10,7 @@ import videoHandler from '../plugins/download/video.js';
 import playHandler from '../plugins/download/play.js';  
 import tagallHandler from '../plugins/group/tagall.js';
 import mathHandler from '../plugins/tools/math.js';
-
+import restartHandler from '..plugins/system/restart.js
 export async function handleCommands(commandName, sock, msg, args, extra) {  
     const { isOwner, isAdmin } = extra;  
   
@@ -65,6 +65,11 @@ export async function handleCommands(commandName, sock, msg, args, extra) {
         case 'calculate':
             await mathHandler(sock, msg, args, { isOwner, isAdmin });
             break;
+       
+        case 'restart':
+        case 'update':    
+              await restartHandler(sock, msg, args, {isOwner, isAdmin });
+              break;
             
         default:
             console.log(`Unknown command: ${commandName}`);
