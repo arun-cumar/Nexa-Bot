@@ -34,7 +34,7 @@ export default async (sock, msg, args) => {
 
             if (!files.length) continue;
 
-            commandList += `╭───〔 ${category.toUpperCase()} 〕───╮\n`;
+            commandList += `〔 ${category.toUpperCase()} 〕\n`;
 
             for (const file of files) {
                 const cmd = file.replace('.js', '');
@@ -42,7 +42,7 @@ export default async (sock, msg, args) => {
                 totalCommands++;
             }
 
-            commandList += `╰────────────────╯\n\n`;
+            commandList += `╰─────────────╯\n\n`;
         }
 
         // Random design
